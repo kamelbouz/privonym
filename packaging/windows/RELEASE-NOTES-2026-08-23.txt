@@ -1,0 +1,60 @@
+PRIVONYM 2.0.20260823 - UPGRADE CONTENT
+=======================================
+
+Console and navigation
+- Delphix-inspired light workspace styling and typography.
+- Overview job links and job actions corrected.
+- Monitor and Scheduler panels enabled.
+- About page identifies Kamel Bouzenad as Developer.
+
+Jobs
+- JOB_ID is displayed in the Jobs panel.
+- Explicit Execute/Re-execute action and compact Report/Edit/Delete menu.
+- Jobs can be renamed, moved to an eligible Rule Set and deleted when allowed.
+- Job creation offers only Rule Sets not already linked to another job.
+- A failed job can be executed again and no longer remains permanently blocked.
+- The latest published Rule Set version is selected at each execution while the
+  JOB_ID and reference remain stable.
+- Windows external job launcher renamed to privonym-job.cmd/.ps1 and made
+  compatible with both development and installed layouts.
+
+Rule Sets and masking
+- Rule Set creation offers only connections not already linked to a Rule Set.
+- DELETE_TABLE_ROWS and TRUNCATE_TABLE are configured as table-level actions,
+  separate from column algorithms.
+- A structural table action makes column rules for the same table inapplicable.
+- DELETE can use a row criterion; TRUNCATE always applies to the full table.
+- Structural algorithms are published and selectable.
+- Owned lookup configuration and additional algorithm metadata are supported.
+
+Execution, validation and reports
+- Per-table planned/anonymized row validation is included in execution results.
+- PDF execution reports are available through the Report action, including for
+  failed executions when an execution result exists.
+- HTTP report lookup and job detail routing corrections are included.
+
+Repository migrations
+- V2_002 Transformer review/publication statuses.
+- V2_003 mandatory Rule Set to data-source relationship and consistency checks.
+- V2_004 connector schema and encrypted credential metadata.
+- V2_005 algorithm-owned lookup configuration.
+- V2_006 table masking rules and publication of structural algorithms.
+- V2_007 administrator-controlled worker threads, execution strategy, chunk
+  size and large-table threshold.
+- V2_008 repository-stored PRE and POST SQL scripts for Jobs.
+- New checksum-based PRIVONYM_SCHEMA_MIGRATION history for repeatable upgrades.
+
+Parallel execution
+- Jobs can run independent table steps and eligible ROWID chunks concurrently.
+- AUTO mode chunks only tables at or above the administrator-defined threshold.
+- CHUNKED mode forces chunking for eligible deterministic, unfiltered UPDATEs.
+- DIRECT mode keeps one transaction per generated table statement.
+- Each chunk is committed and journaled independently. Successful chunks are
+  reused when an execution failure is retried.
+- Jobs and Monitor display the real percentage and completed/total chunk count.
+
+Operations
+- Runtime replacement stops and restarts the Privonym scheduled task.
+- Existing binaries are backed up before replacement and restored automatically
+  if the new runtime does not pass its HTTP health check.
+- Configuration, secrets, logs, reports and business data are preserved.

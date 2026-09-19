@@ -1,0 +1,9 @@
+# Copy this file to privonym-job.properties and restrict its filesystem access.
+repository.host=oracle-repository.example.net
+repository.port=1521
+repository.service=PRIVONYM
+repository.user=privonym
+repository.password=CHANGE_ME
+
+# Alternatively, replace host/port/service with one complete JDBC URL:
+# repository.url=jdbc:oracle:thin:@//oracle-repository.example.net:1521/PRIVONYM

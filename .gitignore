@@ -1,0 +1,25 @@
+target/
+.idea/
+.vscode/
+*.iml
+*.log
+*.zip
+*.class
+*.key
+*.pem
+*.p12
+*.pfx
+*.jks
+.env
+.env.*
+!.env.example
+
+# Local Privonym configuration and encryption material.
+config/*
+!config/*.example
+
+# Runtime state and generated user/report data.
+runtime/
+reports/
+tmp/
+.m2/

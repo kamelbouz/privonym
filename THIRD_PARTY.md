@@ -1,5 +1,31 @@
 # Third-party components
 
+## Scope and offline build
+
+The build uses the JARs committed under `lib`; it does not resolve dependencies
+from a package repository. See [COMPILATION.md](COMPILATION.md) for build commands
+and [PROJET.md](PROJET.md) for architecture and qualification limits.
+
+Inventory of bundled JARs (a bundled component is not necessarily used on every
+execution path):
+
+| Component | Bundled version | Role |
+|---|---|---|
+| Oracle JDBC | 21.1.0.0 (`ojdbc11`) | Oracle repository and target connections |
+| PostgreSQL JDBC | 42.7.13 | PostgreSQL target connections |
+| Microsoft JDBC for SQL Server | 13.4.0.jre11 | SQL Server target connections |
+| Eclipse Jetty | 12.0.38 | Embedded HTTP server |
+| SLF4J API and simple provider | 2.0.7 | Logging |
+| HikariCP | 5.0.1 | Bundled connection-pool library |
+| FlatLaf | 3.4.1 | Bundled desktop UI library |
+| FlatLaf Extras | 3.2.2 | Bundled desktop UI support |
+| XChart | 4.0.3 | Bundled charting library |
+
+This inventory is not a license or vulnerability audit. Before redistributing
+packages, verify the applicable licenses and notices for every bundled artifact.
+Updating a dependency requires compatibility checks and refreshed artifact
+references; the version numbers here do not imply that they are the latest.
+
 ## Eclipse Jetty 12.0.38
 
 - Source: `https://jetty.org/download.html`

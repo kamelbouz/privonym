@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = '2.0-current',
+    [string]$Version = '2.5.0',
     [switch]$SkipBuild
 )
 

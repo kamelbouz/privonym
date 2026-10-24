@@ -1,0 +1,6 @@
+# Copy to config/privonym.properties. Never commit the local configuration.
+# The web server asks for the repository password at login.
+repository.url=jdbc:oracle:thin:@//oracle-repository.example.net:1521/PRIVONYM
+repository.user=PRIVONYM
+server.host=127.0.0.1
+server.port=8080

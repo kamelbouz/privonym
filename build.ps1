@@ -1,5 +1,7 @@
 [CmdletBinding()]
-param()
+param(
+    [string]$JdkHome = $env:JAVA_HOME
+)
 
 $ErrorActionPreference = 'Stop'
 
@@ -45,7 +47,15 @@ if ($missingHttpLibraries) {
 }
 $libraryClasspath = $httpLibraryPaths -join ';'
 
-$javacCommand = Get-Command 'javac' -ErrorAction SilentlyContinue
+$javacCommand = if (-not [string]::IsNullOrWhiteSpace($JdkHome)) {
+    $configuredCompiler = Join-Path $JdkHome 'bin\javac.exe'
+    if (-not (Test-Path -LiteralPath $configuredCompiler -PathType Leaf)) {
+        throw "JdkHome/JAVA_HOME must point to a complete JDK: $configuredCompiler is missing."
+    }
+    Get-Command -Name $configuredCompiler -ErrorAction Stop
+} else {
+    Get-Command 'javac' -ErrorAction SilentlyContinue
+}
 if (-not $javacCommand) {
     throw 'A JDK 17 or newer is required; javac is unavailable.'
 }

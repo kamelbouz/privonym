@@ -26,7 +26,7 @@ $required = @(
     'target\privonym-oracle-adapter.jar', 'target\privonym-http-adapter.jar',
     'database\generated\V2_001_privonym_repository_oracle.sql',
     'database\generated\V2_001_1_privonym_system_metadata_oracle.sql',
-    'lib\postgresql-42.7.13.jar',
+    'lib\postgresql-42.7.14.jar',
     'lib\mssql-jdbc-13.4.0.jre11.jar',
     'privonym-job.ps1', 'privonym-job.cmd', 'privonym-job.sh',
     'packaging\windows\Upgrade-Privonym.ps1', 'packaging\windows\Rollback-Privonym.ps1',
@@ -42,6 +42,8 @@ if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force 
 New-Item -ItemType Directory -Force -Path $staging,(Join-Path $staging 'payload\app'),(Join-Path $staging 'payload\lib'),(Join-Path $staging 'payload\database') | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Install-Privonym.ps1'),
+    (Join-Path $PSScriptRoot 'Verify-PrivonymPackage.ps1'),
+    (Join-Path $PSScriptRoot 'Set-PrivonymPermissions.ps1'),
     (Join-Path $PSScriptRoot 'Install-PrivonymClean.ps1'),
     (Join-Path $PSScriptRoot 'Install-PrivonymReset.ps1'),
     (Join-Path $PSScriptRoot 'Start-PrivonymServer.ps1'),
@@ -62,5 +64,10 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'database\target-functions') -Des
 [IO.File]::WriteAllText((Join-Path $staging 'VERSION.txt'), $Version + [Environment]::NewLine,
         [Text.UTF8Encoding]::new($false))
 
+$checksums = Get-ChildItem -LiteralPath $staging -Recurse -File | Sort-Object FullName | ForEach-Object {
+    $relative = $_.FullName.Substring($staging.Length + 1).Replace('\', '/')
+    "$(Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256 | Select-Object -ExpandProperty Hash)  $relative"
+}
+[IO.File]::WriteAllLines((Join-Path $staging 'SHA256SUMS.txt'), $checksums, [Text.UTF8Encoding]::new($false))
 Compress-Archive -LiteralPath $staging -DestinationPath $archive -CompressionLevel Optimal
 Write-Host "Windows package generated: $archive" -ForegroundColor Green

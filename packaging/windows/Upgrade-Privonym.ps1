@@ -209,6 +209,8 @@ function Wait-Healthy([string]$Url, [int]$TimeoutSeconds) {
 }
 
 Assert-Administrator
+. (Join-Path $packageRoot 'Verify-PrivonymPackage.ps1')
+Test-PrivonymPackage $packageRoot
 if (-not (Test-Path -LiteralPath $payload -PathType Container)) { throw "Upgrade payload is missing: $payload" }
 
 $DataDirectory = Resolve-AbsolutePath $DataDirectory
@@ -242,6 +244,10 @@ foreach ($script in @('Start-PrivonymServer.ps1', 'Uninstall-Privonym.ps1',
 }
 
 $javaPath = Resolve-Java $metadata $JavaPath
+$installedTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+$serviceIdentity = if ($installedTask) { $installedTask.Principal.UserId } else { 'S-1-5-18' }
+& (Join-Path $packageRoot 'Set-PrivonymPermissions.ps1') -Directory @($InstallDirectory, $DataDirectory) `
+        -ServiceIdentity $serviceIdentity
 $taskExists = Stop-PrivonymTask $TaskName
 Wait-RuntimeUnlocked $InstallDirectory
 

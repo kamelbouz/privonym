@@ -51,7 +51,6 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
         SavedPlanLoader, ExecutionJournal, ValidationJournal, JobReportRepository {
     private final Connection connection;
     private final OracleJobPlanRepository legacyPlans = new OracleJobPlanRepository();
-    private final OracleUpdateGenerator generator = new OracleUpdateGenerator();
 
     public OraclePlanningAdapter(Connection connection) {
         this.connection = Objects.requireNonNull(connection, "connection");
@@ -133,7 +132,7 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     int number = rows.getInt("step_number");
-                    String code = rows.getString("generated_code");
+                    String code = ProtectedSql.read(rows.getString("generated_code"));
                     String stored = rows.getString("generated_code_checksum");
                     if (code == null || stored == null
                             || !SqlChecksum.sha256(code).equals(stored)) {
@@ -166,7 +165,7 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
             statement.setLong(1, jobId.value());
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    String code = rows.getString("generated_code");
+                    String code = ProtectedSql.read(rows.getString("generated_code"));
                     String stored = rows.getString("generated_code_checksum");
                     if (code == null || stored == null || !SqlChecksum.sha256(code).equals(stored)) {
                         throw new IllegalStateException("Saved SQL checksum mismatch at step "
@@ -242,7 +241,16 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
             ApplicationAuditEvent event) {
         try {
             for (ExecutableStep step : plan.steps()) {
-                finishStep(step.jobStepId(), "FAILED", 0, error);
+                long committedRows = 0;
+                try (PreparedStatement chunks = connection.prepareStatement(
+                        "SELECT COALESCE(SUM(rows_processed),0) FROM job_chunk "
+                        + "WHERE job_step_id=? AND status='SUCCEEDED'")) {
+                    chunks.setLong(1, step.jobStepId());
+                    try (ResultSet row = chunks.executeQuery()) {
+                        row.next(); committedRows = row.getLong(1);
+                    }
+                }
+                finishStep(step.jobStepId(), "FAILED", committedRows, error);
             }
             updateExecutionJob(failedJob.id(), "EXECUTION_FAILED", error);
             append(event);
@@ -697,7 +705,7 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
                     };
                     statement = new GeneratedOracleStatement(sql, SqlChecksum.sha256(sql));
                 } else {
-                    statement = generator.generate(table.table(), table.assignments());
+                    statement = generateColumnStatement(table);
                 }
                 steps.add(new GeneratedPlanStep(table.catalogTableId(), table.table().toSql(),
                         statement.sql(), new PlanChecksum(statement.sha256())));
@@ -708,6 +716,14 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
         } catch (SQLException error) {
             throw repositoryFailure("generate plan", error);
         }
+    }
+
+    static GeneratedOracleStatement generateColumnStatement(RepositoryTablePlan table) {
+        GeneratedOracleStatement generated = new OracleUpdateGenerator().generate(
+                table.table(), table.assignments());
+        if (table.filterExpression().isBlank()) return generated;
+        String sql = generated.sql() + "\nWHERE " + table.filterExpression();
+        return new GeneratedOracleStatement(sql, SqlChecksum.sha256(sql));
     }
 
     @Override
@@ -735,7 +751,8 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
                 PreparedStatement insert = connection.prepareStatement(insertSql)) {
             int stepNumber = nextStepNumber;
             for (GeneratedPlanStep step : plan.steps()) {
-                statement.setString(1, step.generatedCode());
+                String storedCode = ProtectedSql.store(step.generatedCode());
+                statement.setString(1, storedCode);
                 statement.setString(2, step.checksum().value());
                 statement.setLong(3, jobId.value());
                 statement.setLong(4, step.catalogTableId());
@@ -743,7 +760,7 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
                     insert.setLong(1, jobId.value());
                     insert.setInt(2, stepNumber);
                     insert.setLong(3, step.catalogTableId());
-                    insert.setString(4, step.generatedCode());
+                    insert.setString(4, storedCode);
                     insert.setString(5, step.checksum().value());
                     requireOne(insert.executeUpdate(), "insert generated plan step");
                 }
@@ -766,7 +783,7 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     DependencyStep step = new DependencyStep(rows.getLong(1), rows.getLong(2),
-                            operationType(rows.getString(3)));
+                            operationType(ProtectedSql.read(rows.getString(3))));
                     byTable.put(step.tableId(), step);
                 }
             }

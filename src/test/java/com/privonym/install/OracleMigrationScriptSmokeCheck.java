@@ -37,6 +37,8 @@ public final class OracleMigrationScriptSmokeCheck {
         verifyMultilineUpdateAndMergeParsing();
         verifyMaskStringMigration(directory.resolve(
                 "V2_016_mask_string_replacement_value_oracle.sql"));
+        com.privonym.repository.oracle.TextMaskingOracleCheck.profiles(
+                directory.resolve("V2_022_clob_text_masking_profiles_oracle.sql"));
         int statements = 0;
         for (Path migration : migrations) {
             List<String> parsed = OracleRepositoryInstaller.statements(

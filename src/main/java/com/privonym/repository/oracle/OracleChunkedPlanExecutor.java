@@ -58,8 +58,10 @@ public final class OracleChunkedPlanExecutor implements TargetPlanExecutor {
                 return new StepExecutionResult(step.jobStepId(), totalRows);
             }
             long chunkId = startChunk(step.jobStepId(), chunkNumber, previous, last);
+            boolean commitAttempted = false;
             try {
                 int rows = executeChunk(step.generatedCode(), previous, last);
+                commitAttempted = true;
                 target.commit();
                 completeChunk(chunkId, rows);
                 totalRows += rows;
@@ -67,6 +69,8 @@ public final class OracleChunkedPlanExecutor implements TargetPlanExecutor {
                 chunkNumber++;
             } catch (SQLException | RuntimeException error) {
                 rollbackTarget(error);
+                if (commitAttempted) throw new IllegalStateException(
+                        "Chunk " + chunkId + " has an uncertain commit outcome; reconcile before retry.", error);
                 failChunk(chunkId, error);
                 throw new IllegalStateException("CHUNKED execution failed at chunk "
                         + chunkNumber + ": " + error.getMessage(), error);
@@ -106,6 +110,11 @@ public final class OracleChunkedPlanExecutor implements TargetPlanExecutor {
     }
 
     private ChunkCursor loadCursor(long stepId) {
+        try {
+            OracleParallelPlanExecutor.requireReconciledChunks(repository, stepId);
+        } catch (SQLException error) {
+            throw new IllegalStateException("Unable to check chunk recovery state", error);
+        }
         String sql = """
                 SELECT COALESCE(MAX(chunk_number), 0) + 1 next_chunk,
                        COALESCE(SUM(rows_processed), 0) processed

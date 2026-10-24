@@ -44,7 +44,7 @@ public final class OracleRepositoryPreflight {
                     String stepStatus = rows.getString("step_status");
 
                     if ("ANONYMIZE_TABLE".equals(stepType)) {
-                        String sql = rows.getString("generated_code");
+                        String sql = ProtectedSql.read(rows.getString("generated_code"));
                         String storedChecksum = rows.getString("generated_code_checksum");
                         if (sql == null || sql.isBlank()) {
                             throw new OracleTemplateException(

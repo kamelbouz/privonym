@@ -502,6 +502,36 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
 
     @Override
     public boolean handle(Request request, Response response, Callback callback) {
+        PrivonymUser actor = sessionUser(request);
+        boolean mutation = !List.of("GET", "HEAD", "OPTIONS").contains(request.getMethod());
+        String reference = request.getMethod() + " " + request.getHttpURI().getPath();
+        if (actor != null && mutation && applicationSecurity != null) {
+            try {
+                applicationSecurity.record(actor.username(), "HTTP_REQUEST_RECEIVED",
+                        "HTTP_REQUEST", reference, "RECEIVED");
+            } catch (RuntimeException error) {
+                writeJson(response, callback, 503, "{\"error\":\"AUDIT_UNAVAILABLE\"}");
+                return true;
+            }
+        }
+        boolean handled = handleRequest(request, response, callback);
+        if (actor != null && mutation && applicationSecurity != null) {
+            try {
+                applicationSecurity.record(actor.username(), "HTTP_REQUEST_COMPLETED", "HTTP_REQUEST",
+                        reference, response.getStatus() < 400 ? "ACCEPTED" : "REJECTED");
+            } catch (RuntimeException error) {
+                // The response may already be committed; the RECEIVED event remains durable.
+                System.err.println("Unable to append HTTP audit completion event");
+            }
+        }
+        return handled;
+    }
+
+    private boolean handleRequest(Request request, Response response, Callback callback) {
+        if (request.getLength() > 8 * 1024 * 1024) {
+            writeJson(response, callback, 413, "{\"error\":\"REQUEST_TOO_LARGE\"}");
+            return true;
+        }
         String path = request.getHttpURI().getPath();
         if (LOGO_PATH.equals(path)) {
             if (requireGet(request, response, callback)) {
@@ -582,6 +612,14 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
                 response.setStatus(303);
                 response.getHeaders().put("Location", LOGIN_PATH);
                 callback.succeeded();
+            }
+            return true;
+        }
+        // Liveness must remain available before repository/application login.
+        if (HEALTH_PATH.equals(path)) {
+            if (requireGet(request, response, callback)) {
+                writeJson(response, callback, 200,
+                        "{\"status\":\"UP\",\"service\":\"privonym\",\"apiVersion\":\"v1\"}");
             }
             return true;
         }
@@ -861,19 +899,19 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
     }
 
     private void handleEnvironmentOptions(Response response,Callback callback){try{StringBuilder out=new StringBuilder("{\"environments\":[");int i=0;for(EnvironmentOption e:discovery.listEnvironmentOptions()){if(i++>0)out.append(',');out.append("{\"id\":").append(e.id()).append(",\"code\":\"").append(escape(e.code())).append("\",\"name\":\"").append(escape(e.name())).append("\"}");}out.append("]}");writeJson(response,callback,200,out.toString());}catch(RuntimeException e){serviceUnavailable(response,callback,e);}}
-    private void handleConnectionCreate(Request request,Response response,Callback callback){char[] password=new char[0];try{String body=Content.Source.asString(request);String environmentValue=formParameter(body,"environmentId").trim(),portValue=formParameter(body,"port").trim();if(environmentValue.isBlank())throw new IllegalArgumentException("Environment is required");if(portValue.isBlank())throw new IllegalArgumentException("Port is required");long environmentId;int port;try{environmentId=Long.parseLong(environmentValue);}catch(NumberFormatException e){throw new IllegalArgumentException("Environment is invalid");}try{port=Integer.parseInt(portValue);}catch(NumberFormatException e){throw new IllegalArgumentException("Port must be a number");}password=formParameter(body,"password").toCharArray();ConnectionCreationResult r=discovery.createConnection(environmentId,formParameter(body,"name").trim(),formParameter(body,"technology").trim(),formParameter(body,"schemaName").trim(),formParameter(body,"host").trim(),port,formParameter(body,"service").trim(),formParameter(body,"database").trim(),formParameter(body,"user").trim(),formParameter(body,"secretProvider").trim(),formParameter(body,"secretReference").trim(),password);writeJson(response,callback,201,"{\"connectorId\":"+r.connectorId()+",\"dataSourceId\":"+r.dataSourceId()+",\"name\":\""+escape(r.name())+"\"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_CONNECTION\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}finally{java.util.Arrays.fill(password,'\0');}}
+    private void handleConnectionCreate(Request request,Response response,Callback callback){char[] password=new char[0];try{String body=readBody(request);String environmentValue=formParameter(body,"environmentId").trim(),portValue=formParameter(body,"port").trim();if(environmentValue.isBlank())throw new IllegalArgumentException("Environment is required");if(portValue.isBlank())throw new IllegalArgumentException("Port is required");long environmentId;int port;try{environmentId=Long.parseLong(environmentValue);}catch(NumberFormatException e){throw new IllegalArgumentException("Environment is invalid");}try{port=Integer.parseInt(portValue);}catch(NumberFormatException e){throw new IllegalArgumentException("Port must be a number");}password=formParameter(body,"password").toCharArray();ConnectionCreationResult r=discovery.createConnection(environmentId,formParameter(body,"name").trim(),formParameter(body,"technology").trim(),formParameter(body,"schemaName").trim(),formParameter(body,"host").trim(),port,formParameter(body,"service").trim(),formParameter(body,"database").trim(),formParameter(body,"user").trim(),formParameter(body,"secretProvider").trim(),formParameter(body,"secretReference").trim(),password);writeJson(response,callback,201,"{\"connectorId\":"+r.connectorId()+",\"dataSourceId\":"+r.dataSourceId()+",\"name\":\""+escape(r.name())+"\"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_CONNECTION\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}finally{java.util.Arrays.fill(password,'\0');}}
     private void handleConnectionDelete(String id,Response response,Callback callback){try{discovery.deleteConnection(Long.parseLong(id));writeJson(response,callback,200,"{\"status\":\"DELETED\"}");}catch(IllegalArgumentException e){writeJson(response,callback,404,"{\"error\":\"CONNECTION_NOT_FOUND\"}");}catch(IllegalStateException e){writeJson(response,callback,409,"{\"error\":\"CONNECTION_IN_USE\",\"message\":\""+escape(e.getMessage())+"\"}");}}
-    private void handleConnectionCredentials(String id,Request request,Response response,Callback callback){char[] password=new char[0];try{String body=Content.Source.asString(request);String environmentValue=formParameter(body,"environmentId").trim(),portValue=formParameter(body,"port").trim();if(environmentValue.isBlank())throw new IllegalArgumentException("Environment is required");if(portValue.isBlank())throw new IllegalArgumentException("Port is required");long environmentId;int port;try{environmentId=Long.parseLong(environmentValue);}catch(NumberFormatException error){throw new IllegalArgumentException("Environment is invalid");}try{port=Integer.parseInt(portValue);}catch(NumberFormatException error){throw new IllegalArgumentException("Port must be a number");}password=formParameter(body,"password").toCharArray();ConnectionUpdateCommand command=new ConnectionUpdateCommand(environmentId,formParameter(body,"name"),formParameter(body,"technology"),formParameter(body,"schemaName"),formParameter(body,"host"),port,formParameter(body,"service"),formParameter(body,"database"),formParameter(body,"user"),formParameter(body,"secretProvider"),formParameter(body,"secretReference"),password);discovery.updateConnection(Long.parseLong(id),command);writeJson(response,callback,200,"{\"status\":\"UPDATED\"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_CONNECTION\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}finally{java.util.Arrays.fill(password,'\0');}}
+    private void handleConnectionCredentials(String id,Request request,Response response,Callback callback){char[] password=new char[0];try{String body=readBody(request);String environmentValue=formParameter(body,"environmentId").trim(),portValue=formParameter(body,"port").trim();if(environmentValue.isBlank())throw new IllegalArgumentException("Environment is required");if(portValue.isBlank())throw new IllegalArgumentException("Port is required");long environmentId;int port;try{environmentId=Long.parseLong(environmentValue);}catch(NumberFormatException error){throw new IllegalArgumentException("Environment is invalid");}try{port=Integer.parseInt(portValue);}catch(NumberFormatException error){throw new IllegalArgumentException("Port must be a number");}password=formParameter(body,"password").toCharArray();ConnectionUpdateCommand command=new ConnectionUpdateCommand(environmentId,formParameter(body,"name"),formParameter(body,"technology"),formParameter(body,"schemaName"),formParameter(body,"host"),port,formParameter(body,"service"),formParameter(body,"database"),formParameter(body,"user"),formParameter(body,"secretProvider"),formParameter(body,"secretReference"),password);discovery.updateConnection(Long.parseLong(id),command);writeJson(response,callback,200,"{\"status\":\"UPDATED\"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_CONNECTION\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}finally{java.util.Arrays.fill(password,'\0');}}
     private void handleEmptyRulesetCreate(String id,Request request,Response response,Callback callback){try{long dataSourceId=Long.parseLong(id);String name=queryParameter(request,"name").trim();if(name.isBlank())throw new IllegalArgumentException("A Rule Set name is required");String code=(name+"_"+dataSourceId).toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z0-9]+","_").replaceAll("^_+|_+$","");if(code.isEmpty()||!Character.isLetter(code.charAt(0)))code="RULESET_"+code;if(code.length()>100)code=code.substring(0,100);DiscoveryCreationResult r=discovery.createEmptyRuleset(dataSourceId,code,name);assignOwner(request,r.rulesetId());writeJson(response,callback,201,"{\"rulesetId\":"+r.rulesetId()+",\"versionId\":"+r.versionId()+"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_RULESET\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(IllegalStateException e){writeJson(response,callback,409,"{\"error\":\"RULESET_EXISTS\",\"message\":\""+escape(e.getMessage())+"\"}");}}
 
     private void handleDiscoveryScan(String id,Response response,Callback callback){try{DiscoveryScan scan=discovery.scan(Long.parseLong(id));StringBuilder out=new StringBuilder("{\"dataSourceId\":").append(scan.dataSourceId()).append(",\"connectionName\":\"").append(escape(scan.connectionName())).append("\",\"rulesetExists\":").append(scan.rulesetExists()).append(",\"algorithms\":[");int i=0;for(MaskingAlgorithmOption a:scan.algorithms()){if(i++>0)out.append(',');out.append("{\"code\":\"").append(escape(a.code())).append("\",\"name\":\"").append(escape(a.name())).append("\",\"category\":\"").append(escape(a.category())).append("\"}");}out.append("],\"findings\":[");i=0;for(DiscoveryFinding f:scan.findings()){if(i++>0)out.append(',');out.append("{\"columnId\":").append(f.columnId()).append(",\"schema\":\"").append(escape(f.schema())).append("\",\"table\":\"").append(escape(f.table())).append("\",\"column\":\"").append(escape(f.column())).append("\",\"dataType\":\"").append(escape(f.dataType())).append("\",\"classification\":\"").append(escape(f.classification())).append("\",\"confidence\":").append(f.confidence()).append(",\"suggestedAlgorithm\":\"").append(escape(f.suggestedAlgorithm())).append("\"}");}out.append("]}");writeJson(response,callback,200,out.toString());}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_SCAN\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(RuntimeException e){serviceUnavailable(response,callback,e);}}
 
-    private void handleDiscoveryCreate(String id,Request request,Response response,Callback callback){try{long dataSourceId=Long.parseLong(id);String code=queryParameter(request,"code").trim().toUpperCase(java.util.Locale.ROOT);String name=queryParameter(request,"name").trim();if(!code.matches("[A-Z][A-Z0-9_]{2,99}")||name.isBlank())throw new IllegalArgumentException("A valid code and name are required");List<DiscoverySelection> selections=new java.util.ArrayList<>();for(String line:Content.Source.asString(request).split("\\R")){if(line.isBlank())continue;String[] pair=line.split(",",2);if(pair.length!=2)throw new IllegalArgumentException("Invalid selection");selections.add(new DiscoverySelection(Long.parseLong(pair[0]),pair[1].trim()));}DiscoveryCreationResult result=discovery.createRuleset(dataSourceId,code,name,selections);assignOwner(request,result.rulesetId());writeJson(response,callback,201,"{\"rulesetId\":"+result.rulesetId()+",\"versionId\":"+result.versionId()+",\"code\":\""+escape(result.code())+"\",\"rulesCreated\":"+result.rulesCreated()+"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_DISCOVERY_REQUEST\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(IllegalStateException e){writeJson(response,callback,409,"{\"error\":\"RULESET_ALREADY_EXISTS\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}}
+    private void handleDiscoveryCreate(String id,Request request,Response response,Callback callback){try{long dataSourceId=Long.parseLong(id);String code=queryParameter(request,"code").trim().toUpperCase(java.util.Locale.ROOT);String name=queryParameter(request,"name").trim();if(!code.matches("[A-Z][A-Z0-9_]{2,99}")||name.isBlank())throw new IllegalArgumentException("A valid code and name are required");List<DiscoverySelection> selections=new java.util.ArrayList<>();for(String line:readBody(request).split("\\R")){if(line.isBlank())continue;String[] pair=line.split(",",2);if(pair.length!=2)throw new IllegalArgumentException("Invalid selection");selections.add(new DiscoverySelection(Long.parseLong(pair[0]),pair[1].trim()));}DiscoveryCreationResult result=discovery.createRuleset(dataSourceId,code,name,selections);assignOwner(request,result.rulesetId());writeJson(response,callback,201,"{\"rulesetId\":"+result.rulesetId()+",\"versionId\":"+result.versionId()+",\"code\":\""+escape(result.code())+"\",\"rulesCreated\":"+result.rulesCreated()+"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_DISCOVERY_REQUEST\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(IllegalStateException e){writeJson(response,callback,409,"{\"error\":\"RULESET_ALREADY_EXISTS\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}}
 
     private void handleRepositoryLogin(Request request, Response response, Callback callback) {
         char[] password = new char[0];
         try {
-            String body = Content.Source.asString(request);
+            String body = readBody(request);
             String value = formParameter(body, "password");
             password = value.toCharArray();
             if (password.length == 0) {
@@ -994,7 +1032,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
     private void handleJobUpdate(String currentReference,Request request,Response response,
             Callback callback){
         try {
-            String body=Content.Source.asString(request);
+            String body=readBody(request);
             long rulesetId=Long.parseLong(formParameter(body,"rulesetId"));
             int parallelDegree=Integer.parseInt(formParameter(body,"parallelDegree"));
             int chunkSize=Integer.parseInt(formParameter(body,"chunkSize"));
@@ -1014,7 +1052,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
     private void handleJobScript(String reference,String phase,Request request,Response response,
             Callback callback) {
         try {
-            String content=Content.Source.asString(request);
+            String content=readBody(request);
             String fileName=queryParameter(request,"fileName");
             rulesets.saveJobScript(reference,phase,fileName,content);
             writeJson(response,callback,200,"{\"reference\":\""+escape(reference)
@@ -1058,7 +1096,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
 
     private void handleEnvironmentCreate(Request request, Response response, Callback callback) {
         try {
-            String body = Content.Source.asString(request);
+            String body = readBody(request);
             EnvironmentSummary created = environments.createEnvironment(
                     formParameter(body, "code"), formParameter(body, "name"),
                     formParameter(body, "description"));
@@ -1104,7 +1142,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             long dataSourceId = Long.parseLong(queryParameter(request, "dataSourceId"));
             if (dataSourceId <= 0) throw new NumberFormatException();
             DataSourceInventory selectedInventory = inventory.getInventory(dataSourceId);
-            String sql = Content.Source.asString(request);
+            String sql = readBody(request);
             writeJson(response, callback, 200,
                     sqlInventoryPreviewJson(sqlInventoryPreview.preview(
                             selectedInventory.technology(), sql)));
@@ -1130,7 +1168,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             long dataSourceId = Long.parseLong(dataSourceText);
             String code = queryParameter(request, "code");
             String name = queryParameter(request, "name");
-            String sql = Content.Source.asString(request);
+            String sql = readBody(request);
             DataSourceInventory selectedInventory = inventory.getInventory(dataSourceId);
             DraftInventoryResult created = draftInventory.create(dataSourceId,
                     selectedInventory.technology(), code, name, sql);
@@ -1154,7 +1192,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             Response response, Callback callback) {
         try {
             long dataSourceId = Long.parseLong(dataSourceText);
-            String csv = Content.Source.asString(request);
+            String csv = readBody(request);
             String code = LegacyInventoryCsv.rulesetName(csv);
             SqlInventoryPreview preview = LegacyInventoryCsv.parse(csv);
             // A CSV may be imported into an empty Rule Set whose connection has not been
@@ -1272,7 +1310,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             serviceUnavailable(response, callback, error);
         }
     }
-    private void handleAlgorithmClone(Request request,Response response,Callback callback){try{String body=Content.Source.asString(request);var result=inventoryManagement.cloneAlgorithm(queryParameter(request,"template"),queryParameter(request,"code"),queryParameter(request,"name"),lookupImportValues(body));writeJson(response,callback,201,"{\"algorithmId\":"+result.algorithmId()+",\"versionId\":"+result.versionId()+",\"code\":\""+escape(result.code())+"\",\"name\":\""+escape(result.name())+"\",\"implementationType\":\""+escape(result.implementationType())+"\",\"status\":\""+result.status()+"\",\"lookupValueCount\":"+result.lookupValueCount()+"}");}catch(IOException|IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"ALGORITHM_CREATION_REJECTED\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(RuntimeException e){System.err.println("Algorithm creation failed: "+e.getMessage());writeJson(response,callback,500,"{\"error\":\"ALGORITHM_CREATION_FAILED\",\"message\":\""+escape(e.getMessage())+"\"}");}}
+    private void handleAlgorithmClone(Request request,Response response,Callback callback){try{String body=readBody(request);var result=inventoryManagement.cloneAlgorithm(queryParameter(request,"template"),queryParameter(request,"code"),queryParameter(request,"name"),lookupImportValues(body));writeJson(response,callback,201,"{\"algorithmId\":"+result.algorithmId()+",\"versionId\":"+result.versionId()+",\"code\":\""+escape(result.code())+"\",\"name\":\""+escape(result.name())+"\",\"implementationType\":\""+escape(result.implementationType())+"\",\"status\":\""+result.status()+"\",\"lookupValueCount\":"+result.lookupValueCount()+"}");}catch(IOException|IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"ALGORITHM_CREATION_REJECTED\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(RuntimeException e){System.err.println("Algorithm creation failed: "+e.getMessage());writeJson(response,callback,500,"{\"error\":\"ALGORITHM_CREATION_FAILED\",\"message\":\""+escape(e.getMessage())+"\"}");}}
 
     private static List<String> lookupImportValues(String body){List<String> values=new java.util.ArrayList<>();if(body==null)return values;for(String raw:body.split("\\R")){String line=raw.trim();if(line.isBlank())continue;String value=line;if(line.startsWith("\"")&&line.length()>1){int end=line.indexOf("\"",1);while(end>0&&end+1<line.length()&&line.charAt(end+1)=='\"')end=line.indexOf("\"",end+2);if(end>0)value=line.substring(1,end).replace("\"\"","\"");}else{int comma=line.indexOf(',');int semicolon=line.indexOf(';');int cut=comma<0?semicolon:semicolon<0?comma:Math.min(comma,semicolon);if(cut>=0)value=line.substring(0,cut).trim();}if(values.isEmpty()&&value.matches("(?i)value|value_text|name|nom|prenom|ville|adresse"))continue;if(!value.isBlank())values.add(value);}return values;}
 
@@ -1402,7 +1440,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
                 } else {
                     long versionId = Long.parseLong(queryParameter(request, "versionId"));
                     List<RulesetInventorySelection> selections = new java.util.ArrayList<>();
-                    for (String line : Content.Source.asString(request).split("\\R")) {
+                    for (String line : readBody(request).split("\\R")) {
                         if (line.isBlank()) continue;
                         String[] fields = line.split("\\t", -1);
                         if ((fields.length != 4 && fields.length != 5) || fields[2].isBlank())
@@ -1927,7 +1965,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
                         "{\"error\":\"ALREADY_INITIALIZED\",\"message\":\"Privonym security is already initialized\"}");
                 return;
             }
-            String body = Content.Source.asString(request);
+            String body = readBody(request);
             password = formParameter(body, "password").toCharArray();
             PrivonymUser user = applicationSecurity.createInitialAdministrator(
                     formParameter(body, "username"), formParameter(body, "displayName"), password);
@@ -1946,7 +1984,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
     private void handleApplicationLogin(Request request, Response response, Callback callback) {
         char[] password = new char[0];
         try {
-            String body = Content.Source.asString(request);
+            String body = readBody(request);
             password = formParameter(body, "password").toCharArray();
             PrivonymUser user = applicationSecurity.authenticate(
                     formParameter(body, "username"), password);
@@ -1985,7 +2023,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             Response response, Callback callback) {
         char[] password = new char[0];
         try {
-            String body = Content.Source.asString(request);
+            String body = readBody(request);
             password = formParameter(body, "password").toCharArray();
             Set<String> privileges = new HashSet<>();
             String values = formParameter(body, "privileges");
@@ -2019,7 +2057,8 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             String value = path.substring((SECURITY_USERS_API_PATH + "/").length(),
                     path.length() - "/status".length());
             long userId = Long.parseLong(value);
-            String body = Content.Source.asString(request);
+            requireManageableUser(actor, userId);
+            String body = readBody(request);
             boolean enabled = "true".equalsIgnoreCase(formParameter(body, "enabled"));
             applicationSecurity.setUserEnabled(actor.username(), userId, enabled);
             if (!enabled) userSessions.entrySet().removeIf(
@@ -2043,7 +2082,8 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             String value = path.substring((SECURITY_USERS_API_PATH + "/").length(),
                     path.length() - "/privileges".length());
             long userId = Long.parseLong(value);
-            String body = Content.Source.asString(request);
+            requireManageableUser(actor, userId);
+            String body = readBody(request);
             Set<String> privileges = new HashSet<>();
             String values = formParameter(body, "privileges");
             if (!values.isBlank()) for (String item : values.split(",")) privileges.add(item);
@@ -2067,6 +2107,24 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
         } catch (IllegalStateException error) {
             writeJson(response, callback, 409,
                     "{\"error\":\"PRIVILEGE_UPDATE_REJECTED\",\"message\":\"" + escape(error.getMessage()) + "\"}");
+        }
+    }
+
+    private static String readBody(Request request) throws IOException {
+        // Enforce the same bound for unknown-length/chunked requests.
+        try (java.io.InputStream input = Content.Source.asInputStream(request)) {
+            byte[] body = input.readNBytes(8 * 1024 * 1024 + 1);
+            if (body.length > 8 * 1024 * 1024) throw new IOException("Request body exceeds 8 MiB");
+            return new String(body, java.nio.charset.StandardCharsets.UTF_8);
+        }
+    }
+
+    private void requireManageableUser(PrivonymUser actor, long userId) {
+        PrivonymUser target = applicationSecurity.listUsers().stream()
+                .filter(user -> user.id() == userId).findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        if (target.administrator() && !actor.administrator()) {
+            throw new IllegalStateException("Only an administrator can modify an administrator");
         }
     }
 

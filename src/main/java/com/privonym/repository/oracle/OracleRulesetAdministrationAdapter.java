@@ -669,6 +669,15 @@ public final class OracleRulesetAdministrationAdapter
                     throw new IllegalStateException("Job cannot be completed from status " + job.status());
                 }
                 executeStoredScript(repository, target, job.id().value(), "POST");
+                // Validate the final state, including changes made by the existing POST phase.
+                target.setReadOnly(true);
+                try {
+                    new ValidateJobService(planning, new OracleTargetDataValidator(repository, target),
+                            planning, Instant::now).validate(new ValidateJobCommand(job.id()));
+                } finally {
+                    target.rollback();
+                    target.setReadOnly(false);
+                }
                 JobReport report = new GenerateReportService(planning, planning, Instant::now)
                         .generate(new GenerateReportCommand(job.id()));
                 ExecutionReportPdfWriter.write(report, Instant.now());
@@ -2098,6 +2107,12 @@ public final class OracleRulesetAdministrationAdapter
             }
             List<RepositoryTablePlan> plans = rulesetPlans.loadRuleset(connection,
                     rulesetId, versionId, technology);
+            if (plans.stream().flatMap(plan -> plan.assignments().stream())
+                    .anyMatch(assignment -> assignment.parameterDefinitions().stream()
+                            .anyMatch(parameter -> "key_material".equals(parameter.name())))) {
+                throw new IllegalStateException("SQL export is disabled for keyed algorithms "
+                        + "to prevent secret disclosure. Execute this Rule Set through Privonym.");
+            }
             StringBuilder sql = new StringBuilder()
                     .append("-- Privonym Rule Set SQL export\n")
                     .append("-- Rule Set: ").append(code).append("\n")
@@ -2256,7 +2271,8 @@ public final class OracleRulesetAdministrationAdapter
                 sql.append("INSERT INTO ").append(table)
                         .append(" (lookup_index, value_text) VALUES\n");
                 for (int index = start; index < end; index++) {
-                    sql.append("  (").append(index).append(", '")
+                    sql.append("  (").append(index)
+                            .append("SQLSERVER".equals(technology) ? ", N'" : ", '")
                             .append(sqlLiteral(values.get(index))).append("')")
                             .append(index + 1 < end ? ",\n" : ";\n");
                 }

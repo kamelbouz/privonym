@@ -51,7 +51,11 @@ final class OracleParameterPolicy {
                     AlgorithmParameter.integer(name, required, defaultValue, -36500, 36500);
             case "REGEX_MASK.pattern" ->
                     AlgorithmParameter.string(name, required, defaultValue, 500);
-            case "REGEX_MASK.replacement" ->
+            case "REGEX_MASK.replacement",
+                 "TEXT_REDACT_EMAIL.replacement",
+                 "TEXT_REDACT_PHONE_FR.replacement",
+                 "TEXT_REDACT_PHONE_CH.replacement",
+                 "TEXT_REDACT_IBAN_FR_CH.replacement" ->
                     AlgorithmParameter.string(name, required, defaultValue, 100);
             case "CONDITIONAL_MASK.condition_value",
                  "CONDITIONAL_MASK.replacement_value" ->

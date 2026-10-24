@@ -16,6 +16,8 @@ Voir les limites connues dans [PROJET.md](PROJET.md).
 | [PROJET.md](PROJET.md) | Architecture, état constaté, transactions et limites connues |
 | [VISION.md](VISION.md) | Objectif produit, priorités et critères d'une version stable |
 | [COMPILATION.md](COMPILATION.md) | Prérequis, compilation, tests et inventaire des scripts |
+| [CHUNKS.md](CHUNKS.md) | Correctifs des chunks, migration requise et limites de qualification |
+| [TEXT_MASKING.md](TEXT_MASKING.md) | Masquage de fragments dans les CLOB et profils emails/téléphones/IBAN |
 | [Installation Windows](packaging/windows/README-INSTALL.txt) | Installation et exploitation |
 | [Mise à jour Windows](packaging/windows/README-UPGRADE.txt) | Upgrade, sauvegarde et rollback |
 | [THIRD_PARTY.md](THIRD_PARTY.md) | Composants tiers et références disponibles |
@@ -167,8 +169,8 @@ RULESET_NAME,TABLE_OWNER,TABLE_NAME,COLUMN_NAME,DATA_TYPE,ALGORITHM,IS_MASKED,CR
 
 ## Schéma et migrations
 
-Les scripts initiaux sont dans `database/generated`, les 19 évolutions V2_002 à
-V2_020 dans `database/migrations`. L'installateur et l'upgrader appliquent les
+Les scripts initiaux sont dans `database/generated`, les 22 évolutions V2_002 à
+V2_023 dans `database/migrations`. L'installateur et l'upgrader appliquent les
 migrations dans l'ordre et enregistrent leurs checksums dans
 `PRIVONYM_SCHEMA_MIGRATION`. Les connexions web ordinaires n'appliquent pas ces
 migrations. Ne pas réappliquer manuellement les scripts sans vérifier l'état du
@@ -184,3 +186,8 @@ Lire [PROJET.md](PROJET.md), effectuer une modification ciblée, lancer le build
 puis vérifier le diff avant de committer. Ne pas versionner les configurations
 réelles, clés, logs, rapports ou artefacts de `target`. Documenter les changements
 qui affectent l'installation, les transactions, les dialectes ou la reprise.
+
+## Corrections du 24 octobre 2026
+
+Voir [CORRECTIONS.md](CORRECTIONS.md) pour les correctifs, les prérequis de
+configuration et les limites restant à qualifier.

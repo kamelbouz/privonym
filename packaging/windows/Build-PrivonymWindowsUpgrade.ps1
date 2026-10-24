@@ -57,6 +57,8 @@ New-Item -ItemType Directory -Force -Path $staging,
     (Join-Path $staging 'payload\database\migrations') | Out-Null
 
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'Upgrade-Privonym.ps1'),
+    (Join-Path $PSScriptRoot 'Verify-PrivonymPackage.ps1'),
+    (Join-Path $PSScriptRoot 'Set-PrivonymPermissions.ps1'),
     (Join-Path $PSScriptRoot 'Rollback-Privonym.ps1'),
     (Join-Path $PSScriptRoot 'Start-PrivonymServer.ps1'),
     (Join-Path $PSScriptRoot 'Uninstall-Privonym.ps1'),

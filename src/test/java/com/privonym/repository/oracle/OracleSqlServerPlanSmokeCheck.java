@@ -6,7 +6,15 @@ import java.util.List;
 public final class OracleSqlServerPlanSmokeCheck {
     private OracleSqlServerPlanSmokeCheck() { }
 
-    public static void main(String[] args) {
+    public static void main(String[] args) throws Exception {
+        OracleFilteredPlanSmokeCheck.verify();
+        PortableChunkSmokeCheck.verify();
+        AuditRemediationSmokeCheck.verify();
+        CommitRecoverySmokeCheck.verify();
+        if (!OracleJobPlanRepository.lookupTemplate(List.of("中文 O'Brien"), "SQLSERVER")
+                .contains("THEN N'中文 O''Brien'")) {
+            throw new IllegalStateException("SQL Server lookup values must preserve Unicode");
+        }
         String sqlServer = OracleJobPlanRepository.lookupTemplate(
                 List.of("ALICE", "BOB", "CAROL"), "SQLSERVER");
         if (sqlServer.toUpperCase().contains("MOD(")) {

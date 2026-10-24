@@ -23,3 +23,7 @@ runtime/
 reports/
 tmp/
 .m2/
+
+# Local backups and installation-specific audit evidence.
+/backups/
+/audit/

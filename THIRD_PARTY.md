@@ -12,7 +12,7 @@ execution path):
 | Component | Bundled version | Role |
 |---|---|---|
 | Oracle JDBC | 21.1.0.0 (`ojdbc11`) | Oracle repository and target connections |
-| PostgreSQL JDBC | 42.7.13 | PostgreSQL target connections |
+| PostgreSQL JDBC | 42.7.14 | PostgreSQL target connections |
 | Microsoft JDBC for SQL Server | 13.4.0.jre11 | SQL Server target connections |
 | Eclipse Jetty | 12.0.38 | Embedded HTTP server |
 | SLF4J API and simple provider | 2.0.7 | Logging |

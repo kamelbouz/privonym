@@ -29,7 +29,7 @@ La console gère aussi les utilisateurs, les privilèges et la propriété des r
 | `src/main/java/com/privonym/cli` | Commandes interactives et runner de jobs |
 | `src/main/java/com/privonym/install` | Installation et migrations Oracle |
 | `database/generated` | Schéma initial et métadonnées système |
-| `database/migrations` | Évolutions du référentiel, V2_002 à V2_020 |
+| `database/migrations` | Évolutions du référentiel, V2_002 à V2_023 |
 | `database/target-functions` | Fonctions à installer sur les cibles selon les algorithmes |
 | `packaging/windows` | Construction des archives, installation et mise à jour |
 | `lib` | Dépendances binaires utilisées hors ligne |
@@ -85,9 +85,9 @@ La réussite du build ne constitue donc pas une qualification multi-base.
 
 Points à traiter, encore ouverts dans cette livraison documentaire :
 
-- **Validation des lots** : `OracleParallelPlanExecutor.executeChunkedStep`
-  réécrit `ROWS_EXPECTED` avec `rowsProcessed`. La comparaison finale ne contrôle
-  plus indépendamment l'exhaustivité des lignes traitées.
+- **Qualification des lots** : le correctif du 24 octobre conserve un comptage
+  indépendant et détecte les écarts. Sa qualification sur bases réelles et
+  l'application de V2_021 restent à réaliser ; voir [CHUNKS.md](CHUNKS.md).
 - **Santé du serveur** : `/api/v1/health` est traité après les contrôles de sécurité.
   Avec le lanceur de production, les états de connexion peuvent empêcher une
   réponse publique UP, alors que l'upgrade attend cette réponse sans session.
@@ -110,3 +110,8 @@ Le serveur écoute par défaut sur `127.0.0.1:8080`. L'accès distant et l'explo
 Windows sont décrits dans [README.md](README.md) et les guides de packaging.
 Les scripts d'installation, de reset et de migration modifient des données ;
 ils ne font pas partie des vérifications ordinaires du code.
+
+## Corrections du 24 octobre 2026
+
+Voir [CORRECTIONS.md](CORRECTIONS.md) pour les correctifs, les prérequis de
+configuration et les limites restant à qualifier.

@@ -226,15 +226,13 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                 if (!"ORACLE".equals(targetTechnology) && primaryKey == null) {
                     eligible = false;
                 }
-                long estimate = eligible && !"DIRECT".equals(executionMode)
-                        ? estimatedRows(target, operation.table()) : -1;
                 long boundedCount = eligible && "AUTO".equals(executionMode)
                         ? boundedRowCount(target, operation.table(), chunkThreshold) : -1;
                 boolean chunked = eligible && ("CHUNKED".equals(executionMode)
                         || "AUTO".equals(executionMode)
                                 && boundedCount >= chunkThreshold);
                 long expected = chunked
-                        ? Math.max(chunkThreshold, estimate)
+                        ? expectedRows(target, step.generatedCode(), operation)
                         : eligible && "AUTO".equals(executionMode)
                                 ? boundedCount
                         : expectedRows(target, step.generatedCode(), operation);
@@ -320,8 +318,6 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                     + error.getMessage(), error);
         }
         try (Connection repository = openRepository()) {
-            saveMetric(repository, prepared.step().jobStepId(), "ROWS_EXPECTED",
-                    rowsProcessed, "ROWS");
             saveMetric(repository, prepared.step().jobStepId(), "CHUNKS_TOTAL",
                     chunkNumber - 1L, "CHUNKS");
             repository.commit();
@@ -329,6 +325,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             throw new IllegalStateException("Unable to finalize chunk metrics: "
                     + error.getMessage(), error);
         }
+        requireExpectedRows(prepared.expected(), rowsProcessed);
         return rowsProcessed;
     }
 
@@ -354,17 +351,24 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             checkCancellation();
             try (Connection repository = openRepository(); Connection target = openTarget()) {
                 long chunkId = startChunk(repository, step.jobStepId(), range);
+                boolean commitAttempted = false;
                 try {
                     checkCancellation();
                     long rows = chunked ? executeChunk(target, step.generatedCode(), range,
                             primaryKey)
                             : executeDirect(target, step.generatedCode(), operation, expected);
                     checkCancellation();
+                    commitAttempted = true;
                     target.commit();
                     completeChunk(repository, chunkId, rows);
                     return new WorkResult(step.jobStepId(), rows);
                 } catch (SQLException | RuntimeException error) {
                     rollback(target, error);
+                    if (commitAttempted) {
+                        throw new IllegalStateException("Chunk " + chunkId
+                                + " has an uncertain commit outcome. Automatic retry is blocked; "
+                                + "reconcile target data and the chunk journal before resuming.", error);
+                    }
                     if (cancellationRequested.get()) {
                         cancelChunk(repository, chunkId);
                         if (error instanceof JobExecutionCancelledException cancelled) {
@@ -391,8 +395,9 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             throws SQLException {
         String predicate = switch (targetTechnology) {
             case "POSTGRESQL", "SQLSERVER" -> "(? IS NULL OR " + primaryKey.quotedColumn()
-                    + " > CAST(? AS " + primaryKey.castType() + ")) AND "
-                    + primaryKey.quotedColumn() + " <= CAST(? AS " + primaryKey.castType() + ")";
+                    + " > " + boundaryParameter(targetTechnology, primaryKey.castType()) + ") AND "
+                    + primaryKey.quotedColumn() + " <= "
+                    + boundaryParameter(targetTechnology, primaryKey.castType());
             default -> "(? IS NULL OR ROWID > CHARTOROWID(?)) AND ROWID <= CHARTOROWID(?)";
         };
         String sql = baseSql + System.lineSeparator() + "WHERE " + predicate;
@@ -422,10 +427,11 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                     + " > CAST(? AS " + primaryKey.castType() + ")) ORDER BY "
                     + primaryKey.quotedColumn() + " LIMIT ?";
         } else if ("SQLSERVER".equals(targetTechnology)) {
-            sql = "SELECT TOP (?) CONVERT(nvarchar(max)," + primaryKey.quotedColumn()
-                    + ") FROM " + table + " WHERE (? IS NULL OR "
-                    + primaryKey.quotedColumn() + " > CAST(? AS " + primaryKey.castType()
-                    + ")) ORDER BY " + primaryKey.quotedColumn();
+            sql = "SELECT TOP (?) " + sqlServerBoundaryExpression(primaryKey.quotedColumn(),
+                    primaryKey.castType()) + " FROM " + table + " WHERE (? IS NULL OR "
+                    + primaryKey.quotedColumn() + " > "
+                    + boundaryParameter(targetTechnology, primaryKey.castType())
+                    + ") ORDER BY " + primaryKey.quotedColumn();
         } else {
             sql = "SELECT ROWIDTOCHAR(rid) FROM (SELECT ROWID rid FROM " + table
                     + " WHERE (? IS NULL OR ROWID > CHARTOROWID(?))"
@@ -612,12 +618,44 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
 
     private static boolean updatesPrimaryKey(String sql, Operation operation,
             PrimaryKey primaryKey) {
-        String assignments = sql.substring(operation.targetEnd());
-        return Pattern.compile("(?is)(?:^|,)\\s*" + Pattern.quote(primaryKey.quotedColumn())
+        return updatesPrimaryKey(sql.substring(operation.targetEnd()), primaryKey.quotedColumn());
+    }
+
+    static boolean updatesPrimaryKey(String assignments, String quotedColumn) {
+        String name = unquoteIdentifier(quotedColumn);
+        String identifiers = Pattern.quote("\"" + name.replace("\"", "\"\"") + "\"")
+                + "|" + Pattern.quote("[" + name.replace("]", "]]") + "]")
+                + "|" + Pattern.quote(name);
+        return Pattern.compile("(?is)(?:^|,)\\s*(?:" + identifiers + ")"
                 + "\\s*=").matcher(assignments).find();
     }
 
+    static String sqlServerBoundaryExpression(String column, String type) {
+        String normalized = type.toLowerCase(Locale.ROOT);
+        int style = normalized.equals("float") || normalized.equals("real") ? 3
+                : normalized.equals("money") || normalized.equals("smallmoney")
+                        || normalized.startsWith("binary(") || normalized.startsWith("varbinary(") ? 2
+                : normalized.startsWith("datetimeoffset") ? 127
+                : normalized.equals("date") || normalized.startsWith("datetime")
+                        || normalized.equals("smalldatetime") || normalized.startsWith("time(") ? 126 : 0;
+        return "CONVERT(nvarchar(max)," + column + "," + style + ")";
+    }
+
+    static String boundaryParameter(String technology, String type) {
+        if ("SQLSERVER".equals(technology)
+                && (type.startsWith("binary(") || type.startsWith("varbinary("))) {
+            return "CONVERT(" + type + ",?,2)";
+        }
+        return "CAST(? AS " + type + ")";
+    }
+
+    static void requireExpectedRows(long expected, long processed) {
+        if (expected != processed) throw new IllegalStateException(
+                "Chunk row-count mismatch: expected=" + expected + ", processed=" + processed);
+    }
+
     private ResultSet executeTrackedQuery(PreparedStatement statement) throws SQLException {
+        statement.setQueryTimeout(queryTimeoutSeconds());
         activeStatements.add(statement);
         try {
             checkCancellation();
@@ -628,6 +666,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
     }
 
     private int executeTrackedUpdate(PreparedStatement statement) throws SQLException {
+        statement.setQueryTimeout(queryTimeoutSeconds());
         activeStatements.add(statement);
         try {
             checkCancellation();
@@ -641,6 +680,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
 
     private static Map<Integer, SuccessfulChunk> successfulChunks(Connection repository,
             long stepId) throws SQLException {
+        requireReconciledChunks(repository, stepId);
         Map<Integer, SuccessfulChunk> result = new LinkedHashMap<>();
         try (PreparedStatement statement = repository.prepareStatement("""
                 SELECT chunk_number,end_rowid,rows_processed FROM job_chunk
@@ -659,7 +699,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             throws SQLException {
         try (PreparedStatement delete = repository.prepareStatement("""
                 DELETE FROM job_chunk WHERE job_step_id=? AND chunk_number=?
-                  AND status<>'RUNNING'
+                  AND status='FAILED'
                 """)) {
             delete.setLong(1, stepId);
             delete.setInt(2, range.number());
@@ -686,6 +726,21 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                 long id = row.getLong(1);
                 repository.commit();
                 return id;
+            }
+        }
+    }
+
+    static void requireReconciledChunks(Connection repository, long stepId) throws SQLException {
+        try (PreparedStatement statement = repository.prepareStatement("""
+                SELECT COUNT(*) FROM job_chunk WHERE job_step_id=?
+                  AND status<>'SUCCEEDED'
+                """)) {
+            statement.setLong(1, stepId);
+            try (ResultSet row = statement.executeQuery()) {
+                row.next();
+                if (row.getLong(1) != 0) throw new IllegalStateException(
+                        "Step " + stepId + " contains unreconciled chunks. Automatic retry is blocked; "
+                        + "verify target data before changing the chunk journal.");
             }
         }
     }
@@ -781,6 +836,13 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             insert.setLong(5, stepId);
             if (insert.executeUpdate() != 1) throw new SQLException("Execution step was not found");
         }
+    }
+
+    private static int queryTimeoutSeconds() {
+        int value = Integer.getInteger("privonym.jdbc.queryTimeoutSeconds", 900);
+        if (value < 1 || value > 86400) throw new IllegalArgumentException(
+                "privonym.jdbc.queryTimeoutSeconds must be between 1 and 86400");
+        return value;
     }
 
     private Connection openRepository() throws SQLException {

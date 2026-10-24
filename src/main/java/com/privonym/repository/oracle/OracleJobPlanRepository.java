@@ -161,11 +161,6 @@ public final class OracleJobPlanRepository {
                         throw new OracleTemplateException(
                                 "Job cannot be previewed in status: " + jobStatus);
                     }
-                    if (rows.getString("filter_expression") != null) {
-                        throw new OracleTemplateException(
-                                "Filtered rules are not supported in Preview V1");
-                    }
-
                     long tableId = rows.getLong("catalog_table_id");
                     MutableTablePlan table = tables.computeIfAbsent(
                             tableId,
@@ -189,6 +184,9 @@ public final class OracleJobPlanRepository {
                                     rowsUncheckedInt(rows, "execution_order"),
                                     rowsUncheckedNullableLong(rows, "lookup_dataset_id"),
                                     rowsUncheckedNullableInt(rows, "data_length")));
+
+                    String filter = rows.getString("filter_expression");
+                    assignment.filterExpression = filter == null ? "" : filter.trim();
 
                     String parameterName = rows.getString("parameter_name");
                     if (parameterName != null) {
@@ -241,6 +239,7 @@ public final class OracleJobPlanRepository {
 
         List<RepositoryTablePlan> result = new ArrayList<>();
         for (MutableTablePlan table : tables.values()) {
+            table.applyColumnFilters();
             result.add(table.freeze(connection));
         }
         return List.copyOf(result);
@@ -324,7 +323,7 @@ public final class OracleJobPlanRepository {
             RepositoryTablePlan plan,
             GeneratedOracleStatement statement) throws SQLException {
         try (PreparedStatement update = connection.prepareStatement(SAVE_STEP_SQL)) {
-            update.setString(1, statement.sql());
+            update.setString(1, ProtectedSql.store(statement.sql()));
             update.setString(2, statement.sha256());
             update.setLong(3, plan.jobId());
             update.setLong(4, plan.catalogTableId());
@@ -416,7 +415,8 @@ public final class OracleJobPlanRepository {
         StringBuilder template = new StringBuilder(
                 "CASE WHEN ${column} IS NULL THEN NULL ELSE CASE " + bucket);
         for (int index = 0; index < values.size(); index++) {
-            template.append(" WHEN ").append(index).append(" THEN '")
+            template.append(" WHEN ").append(index)
+                    .append("SQLSERVER".equals(technologyCode) ? " THEN N'" : " THEN '")
                     .append(values.get(index).replace("'", "''")).append("'");
         }
         return template.append(" END END").toString();
@@ -474,6 +474,18 @@ public final class OracleJobPlanRepository {
                         }
                     }).toList());
         }
+
+        private void applyColumnFilters() {
+            if (assignments.isEmpty()) return;
+            List<String> filters = assignments.values().stream()
+                    .map(assignment -> assignment.filterExpression).distinct().toList();
+            filterExpression = filters.contains("") ? ""
+                    : filters.size() == 1 ? filters.get(0)
+                    : String.join(" OR ", filters.stream().map(filter -> "(" + filter + ")").toList());
+            if (filters.size() > 1) {
+                assignments.values().forEach(assignment -> assignment.conditional = true);
+            }
+        }
     }
 
     private static final class MutableAssignment {
@@ -486,6 +498,8 @@ public final class OracleJobPlanRepository {
         private final Integer dataLength;
         private final List<AlgorithmParameter> definitions = new ArrayList<>();
         private final Map<String, String> values = new LinkedHashMap<>();
+        private String filterExpression = "";
+        private boolean conditional;
 
         private MutableAssignment(
                 String columnName,
@@ -518,6 +532,20 @@ public final class OracleJobPlanRepository {
             }
             effectiveTemplate = fitHashToColumn(effectiveTemplate, algorithmCode,
                     technologyCode, dataLength);
+            if ("SQLSERVER".equals(technologyCode)) {
+                for (AlgorithmParameter parameter : definitions) {
+                    if (parameter.type() == com.privonym.adapter.oracle.ParameterType.STRING
+                            || parameter.type() == com.privonym.adapter.oracle.ParameterType.ENUM) {
+                        String token = "${param." + parameter.name() + "}";
+                        effectiveTemplate = effectiveTemplate.replace("N" + token, token)
+                                .replace(token, "N" + token);
+                    }
+                }
+            }
+            if (conditional && !filterExpression.isBlank()) {
+                effectiveTemplate = "CASE WHEN (" + filterExpression + ") THEN ("
+                        + effectiveTemplate + ") ELSE ${column} END";
+            }
             return new OracleMaskingAssignment(
                     columnName,
                     algorithmCode,

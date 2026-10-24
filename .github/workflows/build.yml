@@ -1,0 +1,22 @@
+name: Java 17 verification
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Compile and run isolated smoke checks
+        shell: pwsh
+        run: ./build.ps1 -JdkHome $env:JAVA_HOME
+      - name: Verify Windows packaging and permissions
+        shell: pwsh
+        run: ./packaging/windows/Test-AuditRemediations.ps1

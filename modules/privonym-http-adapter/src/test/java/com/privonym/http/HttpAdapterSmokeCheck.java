@@ -750,6 +750,8 @@ public final class HttpAdapterSmokeCheck {
             @Override public boolean isInitialized() { return true; }
             @Override public PrivonymUser createInitialAdministrator(String username,String displayName,char[] password) { return administrator; }
             @Override public PrivonymUser authenticate(String username,char[] password) {
+                if ("MANAGER".equals(username) && "Valid-password1!".equals(new String(password)))
+                    return new PrivonymUser(2,"MANAGER","Manager",false,true,Set.of(ApplicationSecurity.USER_MANAGE));
                 if (!"ADMIN".equalsIgnoreCase(username) || !"Valid-password1!".equals(new String(password)))
                     throw new IllegalArgumentException("invalid");
                 return administrator;
@@ -779,6 +781,29 @@ public final class HttpAdapterSmokeCheck {
             HttpClient securedClient = HttpClient.newHttpClient();
             HttpResponse<String> anonymous = send(securedClient, securedPort, "/api/v1/jobs", "GET");
             require(anonymous.statusCode() == 401, "secured API must reject requests without a Privonym session");
+            require(send(securedClient, securedPort, "/api/v1/health", "GET").statusCode() == 200,
+                    "anonymous liveness must work when application security is enabled");
+            require(send(securedClient, securedPort, "/api/v1/health", "POST").statusCode() == 405,
+                    "anonymous liveness must reject mutations");
+            HttpRequest oversized = HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
+                    + securedPort + "/api/v1/security/login"))
+                    .POST(HttpRequest.BodyPublishers.ofString("X".repeat(8 * 1024 * 1024 + 1))).build();
+            require(securedClient.send(oversized, HttpResponse.BodyHandlers.ofString()).statusCode() == 413,
+                    "oversized HTTP requests must be rejected before login processing");
+            var manager = sendForm(securedClient, securedPort, "/api/v1/security/login",
+                    "username=MANAGER&password=Valid-password1%21", "");
+            require(manager.statusCode() == 200, "delegated manager login");
+            String managerCookie = manager.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
+            for (String operation : List.of("status", "privileges")) {
+                HttpRequest mutation = HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
+                        + securedPort + "/api/v1/security/users/1/" + operation))
+                        .header("Cookie", managerCookie)
+                        .header("Content-Type", "application/x-www-form-urlencoded")
+                        .PUT(HttpRequest.BodyPublishers.ofString("enabled=false&administrator=false&privileges="))
+                        .build();
+                require(securedClient.send(mutation, HttpResponse.BodyHandlers.ofString()).statusCode() == 409,
+                        "delegated manager must not modify an existing administrator: " + operation);
+            }
             HttpResponse<String> signedIn = sendForm(securedClient, securedPort,
                     "/api/v1/security/login", "username=ADMIN&password=Valid-password1%21", "");
             require(signedIn.statusCode() == 200, "Privonym application login must succeed");

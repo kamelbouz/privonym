@@ -79,6 +79,20 @@ public final class OracleRepositoryUpgrader {
 
     private static int[] applyAll(Connection connection, List<Path> migrations, String user) throws Exception {
         ensureHistoryTable(connection);
+        // Refuse to replay earlier scripts against a repository with a partial baseline.
+        String firstMissing = null;
+        for (Path migration : migrations) {
+            String name = migration.getFileName().toString();
+            String recorded = recordedChecksum(connection, name);
+            if (recorded == null && firstMissing == null) firstMissing = name;
+            if (recorded != null) {
+                if (firstMissing != null) throw new IllegalStateException(
+                        "Incomplete migration history: " + firstMissing + " is missing before " + name
+                        + ". Reconcile the installed schema with a verified baseline before upgrading.");
+                if (!recorded.equalsIgnoreCase(sha256(migration))) throw new IllegalStateException(
+                        "Migration checksum mismatch: " + name);
+            }
+        }
         int applied = 0;
         int skipped = 0;
         for (Path migration : migrations) {

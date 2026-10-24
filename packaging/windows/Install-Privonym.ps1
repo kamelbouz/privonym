@@ -60,6 +60,8 @@ function Resolve-Java([string]$RequestedPath) {
 }
 
 Assert-Administrator
+. (Join-Path $packageRoot 'Verify-PrivonymPackage.ps1')
+Test-PrivonymPackage $packageRoot
 $javaPath = Resolve-Java $JavaPath
 if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
     Write-Host "Stopping existing scheduled task '$taskName' before installation..." -ForegroundColor Cyan
@@ -81,7 +83,7 @@ if (-not (Test-Path -LiteralPath $payload -PathType Container)) {
 $requiredRuntimeFiles = @(
     'lib\jetty-server-12.0.38.jar', 'lib\jetty-http-12.0.38.jar',
     'lib\jetty-io-12.0.38.jar', 'lib\jetty-util-12.0.38.jar',
-    'lib\ojdbc11-21.1.0.0.jar', 'lib\postgresql-42.7.13.jar',
+    'lib\ojdbc11-21.1.0.0.jar', 'lib\postgresql-42.7.14.jar',
     'lib\mssql-jdbc-13.4.0.jre11.jar', 'app\privonym-oracle-adapter.jar',
     'app\privonym-http-adapter.jar'
 )
@@ -97,6 +99,7 @@ if ([string]::IsNullOrWhiteSpace($RepositoryUser)) { throw 'RepositoryUser is re
 New-Item -ItemType Directory -Force -Path $InstallDirectory | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $DataDirectory 'config') | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $DataDirectory 'logs') | Out-Null
+& (Join-Path $packageRoot 'Set-PrivonymPermissions.ps1') -Directory @($InstallDirectory, $DataDirectory)
 Copy-Item -LiteralPath (Join-Path $payload 'app') -Destination $InstallDirectory -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $payload 'lib') -Destination $InstallDirectory -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $payload 'database') -Destination $InstallDirectory -Recurse -Force

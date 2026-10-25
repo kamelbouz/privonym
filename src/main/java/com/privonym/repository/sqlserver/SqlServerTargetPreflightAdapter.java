@@ -129,7 +129,7 @@ public final class SqlServerTargetPreflightAdapter implements TargetPreflightAda
                   JOIN algorithm_version av ON av.algorithm_version_id=mr.algorithm_version_id
                   JOIN algorithm a ON a.algorithm_id=av.algorithm_id
                  WHERE j.job_id=? AND a.code IN('HMAC_SHA256','RELATIONSHIP_AWARE_TOKEN','REGEX_MASK','IBAN_GENERATOR',
-                   'TEXT_REDACT_EMAIL','TEXT_REDACT_PHONE_FR','TEXT_REDACT_PHONE_CH','TEXT_REDACT_IBAN_FR_CH')
+                   'TEXT_REDACT_EMAIL','TEXT_REDACT_PHONE_FR','TEXT_REDACT_PHONE_CH','TEXT_REDACT_IBAN_FR_CH','TEXT_REDACT_COMMON')
                 """;
         try (PreparedStatement statement = repository.prepareStatement(sql)) {
             statement.setLong(1, jobId.value());
@@ -141,7 +141,7 @@ public final class SqlServerTargetPreflightAdapter implements TargetPreflightAda
                                 "dbo.PRIVONYM_HMAC_SHA256";
                         case "IBAN_GENERATOR" -> "dbo.PRIVONYM_IBAN_GENERATE";
                         case "TEXT_REDACT_EMAIL", "TEXT_REDACT_PHONE_FR",
-                             "TEXT_REDACT_PHONE_CH", "TEXT_REDACT_IBAN_FR_CH" -> "dbo.PRIVONYM_TEXT_REDACT";
+                             "TEXT_REDACT_PHONE_CH", "TEXT_REDACT_IBAN_FR_CH", "TEXT_REDACT_COMMON" -> "dbo.PRIVONYM_TEXT_REDACT";
                         default -> "dbo.PRIVONYM_REGEX_REPLACE";
                     };
                     requireFunction(function, code);

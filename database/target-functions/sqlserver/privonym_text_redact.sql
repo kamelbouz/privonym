@@ -22,11 +22,11 @@ BEGIN
             IF @at=0 BREAK;
             SET @start=@at-1;
             WHILE @start>=@i AND SUBSTRING(@value,@start,1) COLLATE Latin1_General_100_BIN2
-                LIKE N'[A-Za-z0-9_.%+-]' SET @start=@start-1;
+                LIKE N'[-A-Za-z0-9_.%+]' SET @start=@start-1;
             SET @start=@start+1;
             SET @cursor=@at+1;
             WHILE @cursor<=@n AND SUBSTRING(@value,@cursor,1) COLLATE Latin1_General_100_BIN2
-                LIKE N'[A-Za-z0-9.-]' SET @cursor=@cursor+1;
+                LIKE N'[-A-Za-z0-9.]' SET @cursor=@cursor+1;
             WHILE @cursor>@at+1 AND SUBSTRING(@value,@cursor-1,1) IN(N'.',N'-') SET @cursor=@cursor-1;
             SET @domain=SUBSTRING(@value,@at+1,@cursor-@at-1);
             SET @dot=CHARINDEX(N'.',REVERSE(@domain));

@@ -29,7 +29,7 @@ La console gère aussi les utilisateurs, les privilèges et la propriété des r
 | `src/main/java/com/privonym/cli` | Commandes interactives et runner de jobs |
 | `src/main/java/com/privonym/install` | Installation et migrations Oracle |
 | `database/generated` | Schéma initial et métadonnées système |
-| `database/migrations` | Évolutions du référentiel, V2_002 à V2_023 |
+| `database/migrations` | Évolutions du référentiel, V2_002 à V2_024 |
 | `database/target-functions` | Fonctions à installer sur les cibles selon les algorithmes |
 | `packaging/windows` | Construction des archives, installation et mise à jour |
 | `lib` | Dépendances binaires utilisées hors ligne |

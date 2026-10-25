@@ -170,7 +170,7 @@ RULESET_NAME,TABLE_OWNER,TABLE_NAME,COLUMN_NAME,DATA_TYPE,ALGORITHM,IS_MASKED,CR
 ## Schéma et migrations
 
 Les scripts initiaux sont dans `database/generated`, les 22 évolutions V2_002 à
-V2_023 dans `database/migrations`. L'installateur et l'upgrader appliquent les
+V2_024 dans `database/migrations`. L'installateur et l'upgrader appliquent les
 migrations dans l'ordre et enregistrent leurs checksums dans
 `PRIVONYM_SCHEMA_MIGRATION`. Les connexions web ordinaires n'appliquent pas ces
 migrations. Ne pas réappliquer manuellement les scripts sans vérifier l'état du
@@ -191,6 +191,9 @@ qui affectent l'installation, les transactions, les dialectes ou la reprise.
 
 Le catalogue et les extensions envisagées sont décrits dans
 [ALGORITHMS.md](ALGORITHMS.md). Les propositions y sont distinguées des fonctions livrées.
+
+Le premier lot d'extension ajoute quatre algorithmes portables ; voir
+[ALGORITHM_PALETTE.md](ALGORITHM_PALETTE.md) pour leurs paramètres et leur activation.
 
 Voir [CORRECTIONS.md](CORRECTIONS.md) pour les correctifs, les prérequis de
 configuration et les limites restant à qualifier.

@@ -8,6 +8,12 @@ méthodes de confidentialité indépendantes.
 
 ## Catalogue observé
 
+Le premier lot supplémentaire est livré dans le code par V2_024 : MASK_PARTIAL,
+ROUND_NUMBER, NUMBER_BUCKET et TEXT_REDACT_COMMON, soit 39 définitions après
+activation. Paramètres, limites, qualification et procédure d'activation sont
+décrits dans [ALGORITHM_PALETTE.md](ALGORITHM_PALETTE.md). L'inventaire de 35
+ci-dessous décrit le référentiel avant cette migration.
+
 | Famille | Définitions publiées |
 | --- | --- |
 | Suppression | NULLIFY, ZERO_NUMBER |
@@ -72,8 +78,8 @@ de l'anonymisation définitive.
 
 ## Ordre de réalisation proposé
 
-1. Compléter les opérations SQL portables : masquage partiel, arrondis et
-   généralisation numérique ; ajouter la composition des profils de texte.
+1. Premier lot livré dans V2_024 : masquage partiel, arrondis, intervalles numériques
+   et composition des profils de texte. L'activation reste propre à l'installation.
 2. Construire les profils métier localisés avec cohérence entre colonnes,
    gestion de l'unicité et jeux de données de substitution documentés.
 3. Ajouter un processeur de texte indépendant du moteur cible pour la détection

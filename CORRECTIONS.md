@@ -72,3 +72,15 @@ ne constituent pas une preuve d'anonymisation exhaustive des données personnell
 Les empreintes de livraison ne remplacent pas une signature de confiance.
 
 Les diagnostics, sauvegardes et preuves d'une installation locale sont exclus du dépôt.
+
+## Palette portable, lot 1 — V2_024
+
+Quatre ajouts : MASK_PARTIAL, ROUND_NUMBER, NUMBER_BUCKET et TEXT_REDACT_COMMON,
+avec douze expressions SQL pour les trois moteurs. Les paramètres sont bornés
+dans le runtime. Les règles existantes conservent leurs versions.
+Le précontrôle SQL Server exige la fonction cible pour le profil combiné.
+La fonction SQL Server corrige aussi les classes de caractères email : un tiret
+mal placé absorbait certains séparateurs et pouvait laisser un email apparent.
+Les essais synthétiques couvrent les trois moteurs, les valeurs limites, NULL,
+l'Unicode, les nombres négatifs et les textes longs. Détails et limites :
+[ALGORITHM_PALETTE.md](ALGORITHM_PALETTE.md).

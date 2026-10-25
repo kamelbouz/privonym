@@ -18,6 +18,15 @@ final class OracleParameterPolicy {
             String defaultValue) {
         String key = algorithmCode + "." + name;
         return switch (key) {
+            case "MASK_PARTIAL.visible_prefix_length", "MASK_PARTIAL.visible_suffix_length" ->
+                    AlgorithmParameter.integer(name, required, defaultValue, 0, 100);
+            case "MASK_PARTIAL.mask_character" ->
+                    AlgorithmParameter.enumeration(name, required, defaultValue, Set.of("*","#","X","x","?"));
+            case "ROUND_NUMBER.scale" ->
+                    AlgorithmParameter.integer(name, required, defaultValue, -6, 6);
+            case "NUMBER_BUCKET.bucket_size" ->
+                    AlgorithmParameter.decimal(name, required, defaultValue,
+                            new BigDecimal("0.000001"), new BigDecimal("1000000000000"));
             case "MASK_STRING.mask_character" ->
                     AlgorithmParameter.string(name, required, defaultValue, 1);
             case "MASK_STRING.replacement_value" ->
@@ -52,6 +61,7 @@ final class OracleParameterPolicy {
             case "REGEX_MASK.pattern" ->
                     AlgorithmParameter.string(name, required, defaultValue, 500);
             case "REGEX_MASK.replacement",
+                 "TEXT_REDACT_COMMON.replacement",
                  "TEXT_REDACT_EMAIL.replacement",
                  "TEXT_REDACT_PHONE_FR.replacement",
                  "TEXT_REDACT_PHONE_CH.replacement",

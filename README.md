@@ -189,5 +189,8 @@ qui affectent l'installation, les transactions, les dialectes ou la reprise.
 
 ## Corrections du 24 octobre 2026
 
+Le catalogue et les extensions envisagées sont décrits dans
+[ALGORITHMS.md](ALGORITHMS.md). Les propositions y sont distinguées des fonctions livrées.
+
 Voir [CORRECTIONS.md](CORRECTIONS.md) pour les correctifs, les prérequis de
 configuration et les limites restant à qualifier.

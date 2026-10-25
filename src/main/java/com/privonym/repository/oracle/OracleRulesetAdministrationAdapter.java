@@ -865,16 +865,7 @@ public final class OracleRulesetAdministrationAdapter
 
     private void writeFailedExecutionReport(long jobId, RuntimeException executionError) {
         try (Connection connection = open(true)) {
-            String sql = """
-                    SELECT j.job_reference, j.status,j.started_at,NVL(j.ended_at,SYSTIMESTAMP) report_end_at,
-                           (SELECT COUNT(*) FROM job_step s
-                             WHERE s.job_id=j.job_id AND s.status='SUCCEEDED') succeeded_steps,
-                           (SELECT NVL(SUM(a.rows_processed),0)
-                              FROM job_step s JOIN job_step_attempt a
-                                ON a.job_step_id=s.job_step_id
-                             WHERE s.job_id=j.job_id AND a.status='SUCCEEDED') rows_processed
-                      FROM anonymization_job j WHERE j.job_id=?
-                    """;
+            String sql = ExecutionFailureSummary.SQL;
             String reference;
             String status;
             int succeededSteps;

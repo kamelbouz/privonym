@@ -12,6 +12,7 @@ public final class OracleSqlServerPlanSmokeCheck {
         AuditRemediationSmokeCheck.verify();
         CommitRecoverySmokeCheck.verify();
         ChunkResumeSmokeCheck.verify();
+        FailureReportSmokeCheck.verify();
         if (!OracleJobPlanRepository.lookupTemplate(List.of("中文 O'Brien"), "SQLSERVER")
                 .contains("THEN N'中文 O''Brien'")) {
             throw new IllegalStateException("SQL Server lookup values must preserve Unicode");

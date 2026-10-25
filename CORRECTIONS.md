@@ -52,6 +52,18 @@ reprendre les FAILED existants. Des tests rejouent six chunks réussis et deux
 échoués sur les trois dialectes, sans retraiter les premiers, ainsi qu'un succès
 non contigu et les pannes de commit, rollback et annulation.
 
+### Rapports partiels et durée des requêtes
+
+Un échec utilise les checkpoints courants pour compter les lignes et les tables
+terminées, sans additionner les tentatives anciennes. Le PDF signale une validation
+finale non confirmée au lieu d'afficher des zéros ou des métriques anciennes.
+Le délai JDBC de 900 secondes introduit lors de l'audit n'est plus imposé par défaut
+aux longues opérations de masquage. Il devient explicite via
+`-Dprivonym.jdbc.queryTimeoutSeconds=900`. La valeur par défaut est 0, comme avant
+l'audit (pas de timeout de statement) ; les valeurs admises vont de 0 à 86400.
+Cela ne change pas les délais réseau propres aux pilotes ni les annulations
+demandées par l'utilisateur ou le serveur de base.
+
 Les garde-fous ne fournissent pas une transaction distribuée ni une reprise
 automatique garantissant une seule application. Les certificats TLS, les droits
 runtime, la gestion complète des secrets existants, les restaurations et les tests

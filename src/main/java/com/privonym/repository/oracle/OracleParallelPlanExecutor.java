@@ -846,10 +846,10 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
         }
     }
 
-    private static int queryTimeoutSeconds() {
-        int value = Integer.getInteger("privonym.jdbc.queryTimeoutSeconds", 900);
-        if (value < 1 || value > 86400) throw new IllegalArgumentException(
-                "privonym.jdbc.queryTimeoutSeconds must be between 1 and 86400");
+    static int queryTimeoutSeconds() {
+        int value = Integer.getInteger("privonym.jdbc.queryTimeoutSeconds", 0);
+        if (value < 0 || value > 86400) throw new IllegalArgumentException(
+                "privonym.jdbc.queryTimeoutSeconds must be between 0 and 86400 (0 disables the statement timeout)");
         return value;
     }
 

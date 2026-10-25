@@ -59,26 +59,33 @@ public final class ExecutionReportPdfWriter {
         lines.add("Final status: " + finalStatus);
         lines.add("Generated at (UTC): " + DISPLAY_TIME.format(generatedAt));
         lines.add("Execution time: " + duration(report.executionDurationSeconds()));
-        lines.add("Succeeded steps: " + report.succeededSteps());
+        boolean completed = "SUCCEEDED".equals(finalStatus);
+        lines.add((completed ? "Succeeded steps: " : "Completed table steps: ") + report.succeededSteps());
         lines.add("Rows processed: " + report.rowsProcessed());
         if (failureDetail != null && !failureDetail.isBlank()) {
             lines.add("Failure: " + failureDetail);
         }
         lines.add("");
-        lines.add("TABLE VALIDATION");
-        lines.add("Table | Expected | Anonymized | Difference | Status");
-        report.metrics().stream().filter(metric -> metric.name().startsWith("EXPECTED_"))
-                .sorted(Comparator.comparing(ValidationMetric::name)).forEach(expected -> {
-                    String key = expected.name().substring("EXPECTED_".length());
-                    long anonymized = metric(report, "ANONYMIZED_" + key);
-                    long difference = anonymized - expected.value();
-                    lines.add(key + " | " + expected.value() + " | " + anonymized + " | "
-                            + signed(difference) + " | " + (difference == 0 ? "PASSED" : "FAILED"));
-                });
-        lines.add("");
-        lines.add("TOTALS");
-        lines.add("Expected rows: " + metric(report, "ROWS_EXPECTED_TOTAL"));
-        lines.add("Anonymized rows: " + metric(report, "ROWS_ANONYMIZED_TOTAL"));
+        if (!completed) {
+            lines.add("PARTIAL EXECUTION - FINAL VALIDATION NOT CONFIRMED");
+            lines.add("Recorded processed rows: " + report.rowsProcessed());
+            lines.add("Checkpoint progress is not a completed data validation.");
+        } else {
+            lines.add("TABLE VALIDATION");
+            lines.add("Table | Expected | Anonymized | Difference | Status");
+            report.metrics().stream().filter(metric -> metric.name().startsWith("EXPECTED_"))
+                    .sorted(Comparator.comparing(ValidationMetric::name)).forEach(expected -> {
+                        String key = expected.name().substring("EXPECTED_".length());
+                        long anonymized = metric(report, "ANONYMIZED_" + key);
+                        long difference = anonymized - expected.value();
+                        lines.add(key + " | " + expected.value() + " | " + anonymized + " | "
+                                + signed(difference) + " | " + (difference == 0 ? "PASSED" : "FAILED"));
+                    });
+            lines.add("");
+            lines.add("TOTALS");
+            lines.add("Expected rows: " + metric(report, "ROWS_EXPECTED_TOTAL"));
+            lines.add("Anonymized rows: " + metric(report, "ROWS_ANONYMIZED_TOTAL"));
+        }
         lines.add("");
         lines.add("This report was generated automatically after the execution attempt.");
         return simplePdf(lines);

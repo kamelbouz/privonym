@@ -356,7 +356,7 @@ public final class OracleDiscoveryAdapter implements DiscoveryUseCase, AutoClose
                 while(r.next()){Match m=classify(r.getString(4),r.getString(5));if(m!=null) findings.add(new DiscoveryFinding(
                         r.getLong(1),r.getString(2),r.getString(3),r.getString(4),r.getString(5),m.classification,
                         m.confidence,suggest(algorithms,m.hints)));}}}
-            return new DiscoveryScan(dataSourceId,name,exists,algorithms,findings);
+            return new DiscoveryScan(dataSourceId,name,exists,algorithms,findings,List.of(),DiscoveryDraftWriter.context(c,dataSourceId));
         }catch(SQLException e){throw failure("scan catalog",e);}
     }
 
@@ -377,6 +377,15 @@ public final class OracleDiscoveryAdapter implements DiscoveryUseCase, AutoClose
                 } finally {Arrays.fill(targetPassword,'\0');}
             }
         }catch(SQLException error){throw failure("analyze Discovery text samples",error);}
+    }
+
+    @Override public DiscoveryCreationResult createDraftVersion(long rulesetId,List<DiscoverySelection> selections) {
+        try(Connection repository=open(false)) {
+            try {
+                DiscoveryCreationResult result=DiscoveryDraftWriter.create(repository,rulesetId,selections,username);
+                repository.commit();return result;
+            }catch(SQLException|RuntimeException error){repository.rollback();throw error;}
+        }catch(SQLException error){throw failure("create Discovery draft version",error);}
     }
 
     @Override public DiscoveryCreationResult createRuleset(long dataSourceId,String code,String name,List<DiscoverySelection> selections){

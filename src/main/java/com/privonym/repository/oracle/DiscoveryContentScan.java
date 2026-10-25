@@ -104,7 +104,7 @@ final class DiscoveryContentScan {
             }
         }
         warnings.add("Sampled "+scanned+" text column(s), at most 20 non-NULL values and the first 16384 characters per value. Review column constraints and target function prerequisites before using suggestions.");
-        return new DiscoveryScan(dataSourceId,metadata.connectionName(),metadata.rulesetExists(),available,List.copyOf(findings.values()),warnings);
+        return new DiscoveryScan(dataSourceId,metadata.connectionName(),metadata.rulesetExists(),available,List.copyOf(findings.values()),warnings,metadata.ruleset());
     }
 
     static boolean textType(String type) {

@@ -240,7 +240,13 @@ public final class HttpAdapterSmokeCheck {
             @Override public com.privonym.application.service.DiscoveryScan analyzeContent(long id) {
                 return new com.privonym.application.service.DiscoveryScan(id,"Test connection",true,List.of(),List.of(
                     new com.privonym.application.service.DiscoveryFinding(12,"APP","NOTES","BODY","CLOB","TEXT_SENSITIVE",75,"NULLIFY",
-                        "Context clues; whole-value removal. Review required.",List.of("PERSON_CONTEXT"),20)),List.of("Bounded samples only."));
+                        "Context clues; whole-value removal. Review required.",List.of("PERSON_CONTEXT"),20)),List.of("Bounded samples only."),
+                        new com.privonym.application.service.DiscoveryRulesetContext(61,"CUSTOMER_MASKING","Customer masking",5,6,null));
+            }
+            @Override public com.privonym.application.service.DiscoveryCreationResult createDraftVersion(long id,List<com.privonym.application.service.DiscoverySelection> selections) {
+                if(id==62)throw new IllegalStateException("This Rule Set already has a DRAFT version");
+                if(id!=61||selections.size()!=1||selections.get(0).columnId()!=12)throw new IllegalArgumentException("Invalid selection");
+                return new com.privonym.application.service.DiscoveryCreationResult(61,86,"CUSTOMER_MASKING",1,6,false);
             }
             @Override public com.privonym.application.service.DiscoveryCreationResult createRuleset(long id,String code,String name,List<com.privonym.application.service.DiscoverySelection> selections) { throw new UnsupportedOperationException(); }
             @Override public com.privonym.application.service.DiscoveryCreationResult createEmptyRuleset(long id,String code,String name) { throw new UnsupportedOperationException(); }
@@ -406,8 +412,13 @@ public final class HttpAdapterSmokeCheck {
                     "Discovery supports review of existing sources, requires explicit sampling and leaves suggestions unchecked");
             HttpResponse<String> discoveryScan=send(client,port,"/api/v1/discovery/scan/1","POST");
             require(discoveryScan.statusCode()==200&&discoveryScan.body().contains("\"detectedEntities\":[\"PERSON_CONTEXT\"]")
-                    &&discoveryScan.body().contains("\"sampledValues\":20")&&discoveryScan.body().contains("\"warnings\":[\"Bounded samples only.\"]"),
+                    &&discoveryScan.body().contains("\"sampledValues\":20")&&discoveryScan.body().contains("\"warnings\":[\"Bounded samples only.\"]")
+                    &&discoveryScan.body().contains("\"nextVersion\":6"),
                     "explicit Discovery endpoint must use content analysis and expose evidence without samples");
+            HttpResponse<String> discoveryDraft=sendBody(client,port,"/api/v1/discovery/versions/61","12,NULLIFY");
+            require(discoveryDraft.statusCode()==201&&discoveryDraft.body().contains("\"newRuleset\":false")
+                    &&discoveryDraft.body().contains("\"versionNumber\":6"),"Discovery must create next draft on same Rule Set");
+            require(sendBody(client,port,"/api/v1/discovery/versions/62","12,NULLIFY").statusCode()==409,"existing draft must not be overwritten");
 
             HttpResponse<String> connectionsPage = send(client, port, "/connections", "GET");
             require(connectionsPage.statusCode() == 200
@@ -421,9 +432,8 @@ public final class HttpAdapterSmokeCheck {
                             && connectionsPage.body().contains("id=\"connection-secret-reference\"")
                             && connectionsPage.body().contains("secretProvider:provider,secretReference:reference")
                             && connectionsPage.body().contains("id=\"connection-analyze\"")
-                            && connectionsPage.body().contains("document.getElementById('connection-analyze').hidden=item.rulesetExists")
+                            && connectionsPage.body().contains("document.getElementById('connection-analyze').hidden=!item.enabled")
                             && connectionsPage.body().contains("'/discovery?dataSource='")
-                            && connectionsPage.body().contains("'&analyze=1'")
                             && connectionsPage.body().contains("id=\"connection-credentials-open\"")
                             && connectionsPage.body().contains("document.getElementById('connection-credentials').hidden=true")
                             && connectionsPage.body().contains("Edit database connection")
@@ -760,6 +770,8 @@ public final class HttpAdapterSmokeCheck {
             @Override public boolean isInitialized() { return true; }
             @Override public PrivonymUser createInitialAdministrator(String username,String displayName,char[] password) { return administrator; }
             @Override public PrivonymUser authenticate(String username,char[] password) {
+                if(List.of("EDITOR","OTHER").contains(username)&&"Valid-password1!".equals(new String(password)))
+                    return new PrivonymUser(username.equals("EDITOR")?3:4,username,username,false,true,Set.of(ApplicationSecurity.RULESET_MODIFY_OWN));
                 if ("MANAGER".equals(username) && "Valid-password1!".equals(new String(password)))
                     return new PrivonymUser(2,"MANAGER","Manager",false,true,Set.of(ApplicationSecurity.USER_MANAGE));
                 if (!"ADMIN".equalsIgnoreCase(username) || !"Valid-password1!".equals(new String(password)))
@@ -770,10 +782,10 @@ public final class HttpAdapterSmokeCheck {
             @Override public PrivonymUser createUser(String actor,String username,String displayName,char[] password,boolean admin,Set<String> privileges) { return new PrivonymUser(2,username,displayName,admin,true,privileges); }
             @Override public PrivonymUser updateUserPrivileges(String actor,long userId,boolean admin,Set<String> privileges) { return new PrivonymUser(userId,"USER","User",admin,true,privileges); }
             @Override public void setUserEnabled(String actor,long userId,boolean enabled) { }
-            @Override public boolean ownsRuleset(long userId,long rulesetId) { return true; }
+            @Override public boolean ownsRuleset(long userId,long rulesetId) { return userId!=4&&(userId!=3||rulesetId==61); }
             @Override public boolean ownsRulesetVersion(long userId,long versionId) { return true; }
             @Override public void assignRulesetOwner(long rulesetId,long userId) { }
-            @Override public void assignRulesetVersionOwner(long versionId,long userId) { }
+            @Override public void assignRulesetVersionOwner(long versionId,long userId) { throw new AssertionError("Discovery draft must preserve existing Rule Set owner"); }
             @Override public void record(String username,String action,String type,String reference,String outcome) { }
             @Override public void close() { }
         };
@@ -784,7 +796,7 @@ public final class HttpAdapterSmokeCheck {
         };
         Server securedServer = PrivonymHttpServer.create("127.0.0.1", 0, jobs, environments,
                 inventory, draftInventory, maskingInventories, inventoryManagement, rulesets,
-                null, connectedRepository, security);
+                discovery, connectedRepository, security);
         try {
             securedServer.start();
             int securedPort = ((ServerConnector) securedServer.getConnectors()[0]).getLocalPort();
@@ -823,6 +835,15 @@ public final class HttpAdapterSmokeCheck {
                     "/api/v1/security/users", "", cookie);
             require(users.statusCode() == 200 && users.body().contains("\"username\":\"ADMIN\""),
                     "administrator session must list Privonym users");
+            for(String account:List.of("EDITOR","OTHER")) {
+                HttpResponse<String> login=sendForm(securedClient,securedPort,"/api/v1/security/login",
+                        "username="+account+"&password=Valid-password1%21","");
+                String ownCookie=login.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
+                HttpRequest draftRequest=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+securedPort+"/api/v1/discovery/versions/61"))
+                        .header("Cookie",ownCookie).POST(HttpRequest.BodyPublishers.ofString("12,NULLIFY")).build();
+                require(securedClient.send(draftRequest,HttpResponse.BodyHandlers.ofString()).statusCode()==(account.equals("EDITOR")?201:403),
+                        "Discovery version creation must enforce Rule Set ownership and MODIFY_OWN");
+            }
         } finally {
             securedServer.stop();
         }

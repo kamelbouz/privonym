@@ -13,12 +13,43 @@ de créer un Rule Set brouillon. Aucune proposition ne modifie un Rule Set exist
    examinées, l'explication et l'algorithme proposé.
 4. Ajuster l'algorithme et cocher les colonnes voulues pour créer un brouillon.
 
-Une connexion qui possède déjà un Rule Set reste consultable ; la création d'un
-second Rule Set reste bloquée. Les cases sont initialement décochées. Aucun
+Une connexion qui possède déjà un Rule Set peut créer sa prochaine version
+brouillon, sans créer un second Rule Set. Les cases sont initialement décochées. Aucun
 algorithme n'est choisi arbitrairement lorsqu'une recommandation est indisponible.
 La liste proposée utilise les implémentations publiées de la dernière version
 publiée pour le moteur cible. Les fonctions cibles et les contraintes restent à
 vérifier avant exécution.
+
+## Connexion possédant déjà un Rule Set
+
+Le bouton devient **Create draft vN**, où N est le plus grand numéro existant + 1.
+Le code et le nom du Rule Set sont conservés et affichés sans modification.
+La dernière version publiée sert de base. Toutes ses règles de colonne et de
+table sont copiées avec leurs filtres, ordres, états activés/désactivés et paramètres.
+Les règles non sélectionnées restent donc présentes dans le nouveau brouillon.
+
+Les propositions sélectionnées ajoutent les nouvelles colonnes. Pour une colonne
+déjà configurée, un choix différent change l'algorithme uniquement dans le nouveau
+brouillon ; ses anciens paramètres incompatibles sont retirés, tandis que le filtre,
+l'ordre et l'état sont conservés. Il faut ensuite renseigner les éventuels paramètres
+requis du nouvel algorithme avant publication. Si le code d'algorithme est inchangé,
+la version d'algorithme déjà utilisée et ses paramètres sont conservés exactement.
+Sans proposition sélectionnée, le brouillon est simplement une copie de la version
+publiée. Pour une connexion sans Rule Set, la création initiale reste une version 1
+et exige au moins une sélection.
+
+Un seul brouillon est permis par Rule Set : s'il existe, un lien permet de l'ouvrir ;
+il n'est pas écrasé par une nouvelle analyse. Une demande concurrente est contrôlée
+à nouveau dans la transaction. La création Discovery et la création habituelle
+verrouillent le Rule Set pour sérialiser l'attribution du prochain numéro.
+L'opération exige le droit de modifier le Rule Set et sa propriété, ou un compte
+administrateur. Elle ne réattribue pas le propriétaire. Les versions publiées et
+les jobs qui les utilisent restent inchangés.
+
+Le point d'entrée de cette création est `POST /api/v1/discovery/versions/{rulesetId}`.
+Les sélections sont vérifiées contre la connexion du Rule Set et les implémentations
+publiées de son moteur. La copie et les changements du brouillon forment une seule
+transaction ; une sélection invalide provoque son annulation.
 
 ## Analyse disponible
 
@@ -88,6 +119,13 @@ Les tests de compilation couvrent les formats imbriqués dans des phrases, les
 indices contextuels, les collisions de formats, les valeurs vides, le préfixe
 borné, la non-exposition des passages, les suggestions indisponibles et les types.
 Le test HTTP vérifie le point d'entrée dédié, les explications et les avertissements.
+
+`DiscoveryDraftIntegrationCheck` vérifie le passage v5 vers v6 sur un Rule Set
+synthétique, la conservation des règles/paramètres/filtres, le choix d'un nouvel
+algorithme, l'ajout d'une colonne, la copie sans sélection, le refus d'un second
+brouillon et le rollback sur sélection invalide. Toutes ses métadonnées de test
+sont annulées ; aucune table métier n'est appelée. Les tests HTTP vérifient aussi
+les droits du propriétaire et le refus d'un autre utilisateur.
 
 `DiscoverySamplingIntegrationCheck` qualifie les trois dialectes sur des CTE
 synthétiques : source de plus de 65 000 caractères, Unicode, lecture en flux,

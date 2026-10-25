@@ -729,6 +729,11 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             else handleDiscoveryCreate(path.substring((DISCOVERY_API_PATH+"/rulesets/").length()),request,response,callback);
             return true;
         }
+        if (path.startsWith(DISCOVERY_API_PATH + "/versions/")) {
+            if (!"POST".equals(request.getMethod())) {response.getHeaders().put("Allow","POST");writeJson(response,callback,405,"{\"error\":\"METHOD_NOT_ALLOWED\"}");}
+            else handleDiscoveryVersion(path.substring((DISCOVERY_API_PATH+"/versions/").length()),request,response,callback);
+            return true;
+        }
         if (path.startsWith(DISCOVERY_API_PATH + "/empty-rulesets/")) {if(!"POST".equals(request.getMethod()))writeJson(response,callback,405,"{\"error\":\"METHOD_NOT_ALLOWED\"}");else handleEmptyRulesetCreate(path.substring((DISCOVERY_API_PATH+"/empty-rulesets/").length()),request,response,callback);return true;}
 
         if (JOBS_PATH.equals(path)) {
@@ -909,7 +914,16 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             DiscoveryScan scan=discovery.analyzeContent(Long.parseLong(id));
             StringBuilder out=new StringBuilder("{\"dataSourceId\":").append(scan.dataSourceId())
                     .append(",\"connectionName\":\"").append(escape(scan.connectionName()))
-                    .append("\",\"rulesetExists\":").append(scan.rulesetExists()).append(",\"algorithms\":[");
+                    .append("\",\"rulesetExists\":").append(scan.rulesetExists());
+            out.append(",\"ruleset\":");
+            if(scan.ruleset()==null)out.append("null");
+            else {
+                var state=scan.ruleset();
+                out.append("{\"rulesetId\":").append(state.rulesetId()).append(",\"code\":\"").append(escape(state.code()))
+                        .append("\",\"name\":\"").append(escape(state.name())).append("\",\"currentVersion\":").append(state.currentVersion())
+                        .append(",\"nextVersion\":").append(state.nextVersion()).append(",\"draftVersionId\":").append(state.draftVersionId()).append('}');
+            }
+            out.append(",\"algorithms\":[");
             int i=0;
             for(MaskingAlgorithmOption a:scan.algorithms()) {
                 if(i++>0)out.append(',');
@@ -941,7 +955,30 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             writeJson(response,callback,400,"{\"error\":\"INVALID_SCAN\",\"message\":\""+escape(e.getMessage())+"\"}");
         }catch(RuntimeException e){serviceUnavailable(response,callback,e);}
     }
-    private void handleDiscoveryCreate(String id,Request request,Response response,Callback callback){try{long dataSourceId=Long.parseLong(id);String code=queryParameter(request,"code").trim().toUpperCase(java.util.Locale.ROOT);String name=queryParameter(request,"name").trim();if(!code.matches("[A-Z][A-Z0-9_]{2,99}")||name.isBlank())throw new IllegalArgumentException("A valid code and name are required");List<DiscoverySelection> selections=new java.util.ArrayList<>();for(String line:readBody(request).split("\\R")){if(line.isBlank())continue;String[] pair=line.split(",",2);if(pair.length!=2)throw new IllegalArgumentException("Invalid selection");selections.add(new DiscoverySelection(Long.parseLong(pair[0]),pair[1].trim()));}DiscoveryCreationResult result=discovery.createRuleset(dataSourceId,code,name,selections);assignOwner(request,result.rulesetId());writeJson(response,callback,201,"{\"rulesetId\":"+result.rulesetId()+",\"versionId\":"+result.versionId()+",\"code\":\""+escape(result.code())+"\",\"rulesCreated\":"+result.rulesCreated()+"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_DISCOVERY_REQUEST\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(IllegalStateException e){writeJson(response,callback,409,"{\"error\":\"RULESET_ALREADY_EXISTS\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}}
+    private void handleDiscoveryCreate(String id,Request request,Response response,Callback callback){try{long dataSourceId=Long.parseLong(id);String code=queryParameter(request,"code").trim().toUpperCase(java.util.Locale.ROOT);String name=queryParameter(request,"name").trim();if(!code.matches("[A-Z][A-Z0-9_]{2,99}")||name.isBlank())throw new IllegalArgumentException("A valid code and name are required");List<DiscoverySelection> selections=discoverySelections(request);DiscoveryCreationResult result=discovery.createRuleset(dataSourceId,code,name,selections);assignOwner(request,result.rulesetId());writeDiscoveryCreation(result,response,callback);}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_DISCOVERY_REQUEST\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(IllegalStateException e){writeJson(response,callback,409,"{\"error\":\"RULESET_ALREADY_EXISTS\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}}
+
+    private void handleDiscoveryVersion(String id,Request request,Response response,Callback callback) {
+        try {
+            DiscoveryCreationResult result=discovery.createDraftVersion(Long.parseLong(id),discoverySelections(request));
+            writeDiscoveryCreation(result,response,callback);
+        }catch(IllegalArgumentException error){writeJson(response,callback,400,"{\"error\":\"INVALID_DISCOVERY_REQUEST\",\"message\":\""+escape(error.getMessage())+"\"}");}
+        catch(IllegalStateException error){writeJson(response,callback,409,"{\"error\":\"DRAFT_CONFLICT\",\"message\":\""+escape(error.getMessage())+"\"}");}
+        catch(Exception error){serviceUnavailable(response,callback,new IllegalStateException(error.getMessage(),error));}
+    }
+    private static List<DiscoverySelection> discoverySelections(Request request)throws IOException {
+        List<DiscoverySelection> selections=new java.util.ArrayList<>();
+        for(String line:readBody(request).split("\\R")) {
+            if(line.isBlank())continue;String[] pair=line.split(",",2);
+            if(pair.length!=2)throw new IllegalArgumentException("Invalid selection");
+            selections.add(new DiscoverySelection(Long.parseLong(pair[0]),pair[1].trim()));
+        }
+        return selections;
+    }
+    private void writeDiscoveryCreation(DiscoveryCreationResult result,Response response,Callback callback) {
+        writeJson(response,callback,201,"{\"rulesetId\":"+result.rulesetId()+",\"versionId\":"+result.versionId()
+                +",\"code\":\""+escape(result.code())+"\",\"rulesCreated\":"+result.rulesCreated()
+                +",\"versionNumber\":"+result.versionNumber()+",\"newRuleset\":"+result.newRuleset()+"}");
+    }
 
     private void handleRepositoryLogin(Request request, Response response, Callback callback) {
         char[] password = new char[0];
@@ -2171,6 +2208,11 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
         Long rulesetId = null;
         Long versionId = null;
         if (path.startsWith(DISCOVERY_API_PATH + "/scan/")) privilege = ApplicationSecurity.DISCOVERY_RUN;
+        else if(path.startsWith(DISCOVERY_API_PATH+"/versions/")) {
+            privilege=ApplicationSecurity.RULESET_MODIFY_OWN;
+            try{rulesetId=Long.valueOf(path.substring((DISCOVERY_API_PATH+"/versions/").length()));}
+            catch(NumberFormatException invalid){forbidden(response,callback,"Invalid Rule Set");return false;}
+        }
         else if (path.startsWith(DISCOVERY_API_PATH + "/connections")) privilege = ApplicationSecurity.CONNECTION_MANAGE;
         else if (path.startsWith(DISCOVERY_API_PATH + "/rulesets/")
                 || path.startsWith(DISCOVERY_API_PATH + "/empty-rulesets/")

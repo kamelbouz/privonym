@@ -20,6 +20,8 @@ La console gère aussi les utilisateurs, les privilèges et la propriété des r
 Discovery peut compléter les noms de colonnes par une analyse locale bornée de
 textes Oracle, PostgreSQL et SQL Server. Elle fournit des recommandations motivées,
 sans ajouter de détection pendant les jobs : [DISCOVERY_TEXT.md](DISCOVERY_TEXT.md).
+Pour une connexion déjà configurée, les propositions Discovery peuvent préparer
+la prochaine version brouillon du même Rule Set en conservant sa configuration.
 
 ## Organisation technique
 

@@ -928,6 +928,10 @@ public final class OracleRulesetAdministrationAdapter
     public RulesetVersionView createDraft(long rulesetId, long sourceVersionId, String createdBy) {
         try (Connection connection = open(false)) {
             try {
+                try (PreparedStatement lock = connection.prepareStatement("SELECT ruleset_id FROM ruleset WHERE ruleset_id=? FOR UPDATE")) {
+                    lock.setLong(1,rulesetId);
+                    try(ResultSet row=lock.executeQuery()){if(!row.next())throw new IllegalArgumentException("Rule Set not found");}
+                }
                 int nextVersion;
                 try (PreparedStatement statement = connection.prepareStatement("""
                         SELECT rv.status

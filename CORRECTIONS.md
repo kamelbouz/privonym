@@ -94,3 +94,12 @@ Les propositions sont décochées et restent à valider. Les algorithmes indispo
 pour le moteur ne sont pas sélectionnés arbitrairement. Le moteur d'exécution
 n'appelle pas ce détecteur. Il n'y a ni nouveau modèle NER, ni service externe.
 Voir [DISCOVERY_TEXT.md](DISCOVERY_TEXT.md) pour le périmètre, les limites et les tests.
+
+## Discovery : prochaine version du Rule Set existant
+
+Une connexion déjà liée à un Rule Set peut créer un brouillon au prochain numéro,
+à partir de sa dernière version publiée. Ses règles, filtres et paramètres sont
+copiés avant l'application des propositions sélectionnées. Aucun second Rule Set
+n'est créé, aucun brouillon existant n'est écrasé et aucun propriétaire n'est changé.
+La création est transactionnelle et exige les droits de modification du propriétaire
+ou un compte administrateur. Les règles publiées et jobs restent inchangés.

@@ -351,7 +351,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             checkCancellation();
             try (Connection repository = openRepository(); Connection target = openTarget()) {
                 long chunkId = startChunk(repository, step.jobStepId(), range);
-                boolean commitAttempted = false;
+                boolean commitAttempted = "TRUNCATE".equals(operation.type());
                 try {
                     checkCancellation();
                     long rows = chunked ? executeChunk(target, step.generatedCode(), range,
@@ -363,11 +363,15 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                     completeChunk(repository, chunkId, rows);
                     return new WorkResult(step.jobStepId(), rows);
                 } catch (SQLException | RuntimeException error) {
-                    rollback(target, error);
+                    boolean rolledBack = rollback(target, error);
                     if (commitAttempted) {
                         throw new IllegalStateException("Chunk " + chunkId
                                 + " has an uncertain commit outcome. Automatic retry is blocked; "
                                 + "reconcile target data and the chunk journal before resuming.", error);
+                    }
+                    if (!rolledBack) {
+                        throw new IllegalStateException("Chunk " + chunkId
+                                + " rollback was not confirmed. Automatic retry is blocked.", error);
                     }
                     if (cancellationRequested.get()) {
                         cancelChunk(repository, chunkId);
@@ -699,7 +703,8 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             throws SQLException {
         try (PreparedStatement delete = repository.prepareStatement("""
                 DELETE FROM job_chunk WHERE job_step_id=? AND chunk_number=?
-                  AND status='FAILED'
+                  AND (status='FAILED' OR (status='CANCELLED'
+                       AND error_message LIKE 'PRIVONYM-ROLLBACK-CONFIRMED:%'))
                 """)) {
             delete.setLong(1, stepId);
             delete.setInt(2, range.number());
@@ -733,7 +738,10 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
     static void requireReconciledChunks(Connection repository, long stepId) throws SQLException {
         try (PreparedStatement statement = repository.prepareStatement("""
                 SELECT COUNT(*) FROM job_chunk WHERE job_step_id=?
-                  AND status<>'SUCCEEDED'
+                  AND (status NOT IN ('SUCCEEDED','FAILED')
+                       AND NOT (status='CANCELLED'
+                                AND COALESCE(error_message,'UNKNOWN')
+                                    LIKE 'PRIVONYM-ROLLBACK-CONFIRMED:%'))
                 """)) {
             statement.setLong(1, stepId);
             try (ResultSet row = statement.executeQuery()) {
@@ -749,7 +757,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             throws SQLException {
         try (PreparedStatement statement = repository.prepareStatement("""
                 UPDATE job_chunk SET status='SUCCEEDED',rows_processed=?,ended_at=SYSTIMESTAMP
-                 WHERE chunk_id=? AND status='RUNNING'
+                 WHERE chunk_id=? AND status IN ('RUNNING','CANCELLED')
                 """)) {
             statement.setLong(1, rows);
             statement.setLong(2, chunkId);
@@ -806,8 +814,8 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
     private static void cancelChunk(Connection repository, long chunkId) {
         try (PreparedStatement statement = repository.prepareStatement("""
                 UPDATE job_chunk SET status='CANCELLED',
-                       error_message='Cancelled by operator',ended_at=SYSTIMESTAMP
-                 WHERE chunk_id=? AND status='RUNNING'
+                       error_message='PRIVONYM-ROLLBACK-CONFIRMED: Cancelled by operator',ended_at=SYSTIMESTAMP
+                 WHERE chunk_id=? AND status IN ('RUNNING','CANCELLED')
                 """)) {
             statement.setLong(1, chunkId);
             statement.executeUpdate();
@@ -966,11 +974,13 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
         else statement.setString(index, value);
     }
 
-    private static void rollback(Connection connection, Throwable error) {
+    private static boolean rollback(Connection connection, Throwable error) {
         try {
             connection.rollback();
+            return true;
         } catch (SQLException rollbackError) {
             error.addSuppressed(rollbackError);
+            return false;
         }
     }
 

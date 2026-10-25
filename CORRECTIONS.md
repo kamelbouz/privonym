@@ -42,6 +42,16 @@ paquets dans packaging/windows.
 
 ## Limites restant à qualifier
 
+### Correction de reprise du 25 octobre
+
+Les chunks FAILED sont à nouveau repris, et les SUCCEEDED sont conservés.
+Le blocage global de tous les chunks non réussis a été retiré. Les annulations
+avec rollback confirmé sont reprenables ; les commits ou rollbacks incertains
+restent bloqués. Aucune modification manuelle des statuts n'est nécessaire pour
+reprendre les FAILED existants. Des tests rejouent six chunks réussis et deux
+échoués sur les trois dialectes, sans retraiter les premiers, ainsi qu'un succès
+non contigu et les pannes de commit, rollback et annulation.
+
 Les garde-fous ne fournissent pas une transaction distribuée ni une reprise
 automatique garantissant une seule application. Les certificats TLS, les droits
 runtime, la gestion complète des secrets existants, les restaurations et les tests

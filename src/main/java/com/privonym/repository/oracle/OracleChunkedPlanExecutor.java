@@ -68,9 +68,11 @@ public final class OracleChunkedPlanExecutor implements TargetPlanExecutor {
                 previous = last;
                 chunkNumber++;
             } catch (SQLException | RuntimeException error) {
-                rollbackTarget(error);
+                boolean rolledBack = rollbackTarget(error);
                 if (commitAttempted) throw new IllegalStateException(
                         "Chunk " + chunkId + " has an uncertain commit outcome; reconcile before retry.", error);
+                if (!rolledBack) throw new IllegalStateException(
+                        "Chunk " + chunkId + " rollback was not confirmed; retry is blocked.", error);
                 failChunk(chunkId, error);
                 throw new IllegalStateException("CHUNKED execution failed at chunk "
                         + chunkNumber + ": " + error.getMessage(), error);
@@ -153,7 +155,8 @@ public final class OracleChunkedPlanExecutor implements TargetPlanExecutor {
         try {
             try (PreparedStatement delete = repository.prepareStatement("""
                     DELETE FROM job_chunk WHERE job_step_id = ? AND chunk_number = ?
-                      AND status = 'FAILED'
+                      AND (status = 'FAILED' OR (status = 'CANCELLED'
+                           AND error_message LIKE 'PRIVONYM-ROLLBACK-CONFIRMED:%'))
                     """)) {
                 delete.setLong(1, stepId);
                 delete.setInt(2, number);
@@ -198,11 +201,12 @@ public final class OracleChunkedPlanExecutor implements TargetPlanExecutor {
     private void completeChunk(long chunkId, int rows) throws SQLException {
         try (PreparedStatement statement = repository.prepareStatement("""
                 UPDATE job_chunk SET status = 'SUCCEEDED', rows_processed = ?,
-                       ended_at = SYSTIMESTAMP WHERE chunk_id = ? AND status = 'RUNNING'
+                       ended_at = SYSTIMESTAMP WHERE chunk_id = ? AND status IN ('RUNNING','CANCELLED')
                 """)) {
             statement.setInt(1, rows);
             statement.setLong(2, chunkId);
-            statement.executeUpdate();
+            if (statement.executeUpdate() != 1) throw new SQLException(
+                    "Chunk " + chunkId + " completion was not journaled");
             repository.commit();
         }
     }
@@ -254,11 +258,13 @@ public final class OracleChunkedPlanExecutor implements TargetPlanExecutor {
         }
     }
 
-    private void rollbackTarget(Throwable error) {
+    private boolean rollbackTarget(Throwable error) {
         try {
             target.rollback();
+            return true;
         } catch (SQLException rollbackError) {
             error.addSuppressed(rollbackError);
+            return false;
         }
     }
 

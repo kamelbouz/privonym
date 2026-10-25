@@ -50,7 +50,7 @@ final class AuditRemediationSmokeCheck {
         boolean blocked = false;
         try { OracleParallelPlanExecutor.requireReconciledChunks(repository(1), 1); }
         catch (IllegalStateException expected) { blocked = true; }
-        require(blocked, "uncertain/failed chunks must block automatic retry");
+        require(blocked, "uncertain chunks must block automatic retry");
         System.out.println("Audit remediation smoke check passed.");
     }
 
@@ -72,8 +72,8 @@ final class AuditRemediationSmokeCheck {
         return (Connection) Proxy.newProxyInstance(Connection.class.getClassLoader(),
                 new Class<?>[] {Connection.class}, (proxy, method, args) -> switch (method.getName()) {
                     case "prepareStatement" -> {
-                        require(((String) args[0]).contains("status<>'SUCCEEDED'"),
-                                "all non-success chunks require reconciliation");
+                        require(((String) args[0]).contains("status NOT IN ('SUCCEEDED','FAILED')"),
+                                "known failed chunks must remain retryable");
                         yield query;
                     }
                     default -> throw new UnsupportedOperationException(method.getName());

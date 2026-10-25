@@ -34,11 +34,19 @@ interruption et reprise. Aucun jeu métier n'est modifié par ces tests.
 Le traitement suppose des données stables pendant le job. Il n'existe pas de
 transaction distribuée entre la cible et le référentiel : une interruption après
 commit cible et avant journalisation demeure une limite de reprise à qualifier.
-Depuis les correctifs d'audit du 24 octobre, une tentative de commit dont le
-résultat n'est pas confirmé reste non réconciliée. Tout chunk non réussi
-(y compris FAILED et CANCELLED) bloque la reprise automatique de l'étape.
-Il faut vérifier les données cibles et réconcilier le journal avant reprise ;
-ne pas remettre arbitrairement le statut à FAILED pour forcer un retraitement.
-Ce garde-fou évite le retraitement automatique, sans fournir une transaction
-distribuée ni une reprise automatique garantissant une seule application.
+La reprise conserve les chunks SUCCEEDED et relance les chunks FAILED.
+Un échec n'est enregistré comme FAILED qu'avant toute tentative de commit et
+après retour réussi du rollback cible. Un rollback non confirmé laisse le chunk
+non réconcilié. Les annulations dont le rollback est confirmé portent le marqueur
+PRIVONYM-ROLLBACK-CONFIRMED: et sont également reprenables. Une annulation sans
+ce marqueur reste bloquée, notamment si le journal a été modifié avant la fin du worker.
+Un commit confirmé reste journalisé SUCCEEDED même si une annulation arrive
+simultanément. Les commits dont le résultat n'est pas confirmé restent bloqués.
+Il ne faut pas remettre arbitrairement ces statuts à FAILED.
+
+Le correctif du 25 octobre rétablit la reprise des FAILED, bloquée trop largement
+par le contrôle du 24 octobre. Les FAILED existants restent compatibles, sans
+modification manuelle du référentiel. Cela conserve la sémantique historique de
+ce statut ; un ancien FAILED créé avant la protection du commit ne constitue pas,
+à lui seul, une preuve rétrospective qu'aucun commit cible n'a eu lieu.
 Un échec de validation ne revient pas sur les chunks déjà commités.

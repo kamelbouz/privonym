@@ -17,6 +17,10 @@ versionnées, leur publication, la génération de SQL, les contrôles préalabl
 les jobs, le parallélisme, les lots, l'annulation et les rapports PDF.
 La console gère aussi les utilisateurs, les privilèges et la propriété des règles.
 
+Discovery peut compléter les noms de colonnes par une analyse locale bornée de
+textes Oracle, PostgreSQL et SQL Server. Elle fournit des recommandations motivées,
+sans ajouter de détection pendant les jobs : [DISCOVERY_TEXT.md](DISCOVERY_TEXT.md).
+
 ## Organisation technique
 
 | Emplacement | Responsabilité |

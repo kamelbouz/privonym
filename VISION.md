@@ -19,6 +19,8 @@ certification de conformité.
 - Produire des preuves de traitement et des contrôles indépendants de l'exécution.
 - Protéger les accès et garder les secrets hors du dépôt.
 - Maintenir un build reproductible dans un environnement isolé avec les JAR fournis.
+- Limiter pour l'instant l'analyse contextuelle des textes à Discovery et aux
+  suggestions d'algorithmes validées par l'utilisateur.
 
 ## Feuille de route proposée
 

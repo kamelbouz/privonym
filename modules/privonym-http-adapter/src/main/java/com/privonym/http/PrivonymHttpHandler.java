@@ -904,8 +904,43 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
     private void handleConnectionCredentials(String id,Request request,Response response,Callback callback){char[] password=new char[0];try{String body=readBody(request);String environmentValue=formParameter(body,"environmentId").trim(),portValue=formParameter(body,"port").trim();if(environmentValue.isBlank())throw new IllegalArgumentException("Environment is required");if(portValue.isBlank())throw new IllegalArgumentException("Port is required");long environmentId;int port;try{environmentId=Long.parseLong(environmentValue);}catch(NumberFormatException error){throw new IllegalArgumentException("Environment is invalid");}try{port=Integer.parseInt(portValue);}catch(NumberFormatException error){throw new IllegalArgumentException("Port must be a number");}password=formParameter(body,"password").toCharArray();ConnectionUpdateCommand command=new ConnectionUpdateCommand(environmentId,formParameter(body,"name"),formParameter(body,"technology"),formParameter(body,"schemaName"),formParameter(body,"host"),port,formParameter(body,"service"),formParameter(body,"database"),formParameter(body,"user"),formParameter(body,"secretProvider"),formParameter(body,"secretReference"),password);discovery.updateConnection(Long.parseLong(id),command);writeJson(response,callback,200,"{\"status\":\"UPDATED\"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_CONNECTION\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}finally{java.util.Arrays.fill(password,'\0');}}
     private void handleEmptyRulesetCreate(String id,Request request,Response response,Callback callback){try{long dataSourceId=Long.parseLong(id);String name=queryParameter(request,"name").trim();if(name.isBlank())throw new IllegalArgumentException("A Rule Set name is required");String code=(name+"_"+dataSourceId).toUpperCase(java.util.Locale.ROOT).replaceAll("[^A-Z0-9]+","_").replaceAll("^_+|_+$","");if(code.isEmpty()||!Character.isLetter(code.charAt(0)))code="RULESET_"+code;if(code.length()>100)code=code.substring(0,100);DiscoveryCreationResult r=discovery.createEmptyRuleset(dataSourceId,code,name);assignOwner(request,r.rulesetId());writeJson(response,callback,201,"{\"rulesetId\":"+r.rulesetId()+",\"versionId\":"+r.versionId()+"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_RULESET\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(IllegalStateException e){writeJson(response,callback,409,"{\"error\":\"RULESET_EXISTS\",\"message\":\""+escape(e.getMessage())+"\"}");}}
 
-    private void handleDiscoveryScan(String id,Response response,Callback callback){try{DiscoveryScan scan=discovery.scan(Long.parseLong(id));StringBuilder out=new StringBuilder("{\"dataSourceId\":").append(scan.dataSourceId()).append(",\"connectionName\":\"").append(escape(scan.connectionName())).append("\",\"rulesetExists\":").append(scan.rulesetExists()).append(",\"algorithms\":[");int i=0;for(MaskingAlgorithmOption a:scan.algorithms()){if(i++>0)out.append(',');out.append("{\"code\":\"").append(escape(a.code())).append("\",\"name\":\"").append(escape(a.name())).append("\",\"category\":\"").append(escape(a.category())).append("\"}");}out.append("],\"findings\":[");i=0;for(DiscoveryFinding f:scan.findings()){if(i++>0)out.append(',');out.append("{\"columnId\":").append(f.columnId()).append(",\"schema\":\"").append(escape(f.schema())).append("\",\"table\":\"").append(escape(f.table())).append("\",\"column\":\"").append(escape(f.column())).append("\",\"dataType\":\"").append(escape(f.dataType())).append("\",\"classification\":\"").append(escape(f.classification())).append("\",\"confidence\":").append(f.confidence()).append(",\"suggestedAlgorithm\":\"").append(escape(f.suggestedAlgorithm())).append("\"}");}out.append("]}");writeJson(response,callback,200,out.toString());}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_SCAN\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(RuntimeException e){serviceUnavailable(response,callback,e);}}
-
+    private void handleDiscoveryScan(String id,Response response,Callback callback) {
+        try {
+            DiscoveryScan scan=discovery.analyzeContent(Long.parseLong(id));
+            StringBuilder out=new StringBuilder("{\"dataSourceId\":").append(scan.dataSourceId())
+                    .append(",\"connectionName\":\"").append(escape(scan.connectionName()))
+                    .append("\",\"rulesetExists\":").append(scan.rulesetExists()).append(",\"algorithms\":[");
+            int i=0;
+            for(MaskingAlgorithmOption a:scan.algorithms()) {
+                if(i++>0)out.append(',');
+                out.append("{\"code\":\"").append(escape(a.code())).append("\",\"name\":\"")
+                        .append(escape(a.name())).append("\",\"category\":\"").append(escape(a.category())).append("\"}");
+            }
+            out.append("],\"findings\":[");i=0;
+            for(DiscoveryFinding f:scan.findings()) {
+                if(i++>0)out.append(',');
+                out.append("{\"columnId\":").append(f.columnId()).append(",\"schema\":\"").append(escape(f.schema()))
+                        .append("\",\"table\":\"").append(escape(f.table())).append("\",\"column\":\"").append(escape(f.column()))
+                        .append("\",\"dataType\":\"").append(escape(f.dataType())).append("\",\"classification\":\"")
+                        .append(escape(f.classification())).append("\",\"confidence\":").append(f.confidence())
+                        .append(",\"suggestedAlgorithm\":\"").append(escape(f.suggestedAlgorithm()))
+                        .append("\",\"reason\":\"").append(escape(f.reason())).append("\",\"sampledValues\":").append(f.sampledValues())
+                        .append(",\"detectedEntities\":[");
+                int entityIndex=0;
+                for(String entity:f.detectedEntities()) {
+                    if(entityIndex++>0)out.append(',');out.append('"').append(escape(entity)).append('"');
+                }
+                out.append("]}");
+            }
+            out.append("],\"warnings\":[");i=0;
+            for(String warning:scan.warnings()) {
+                if(i++>0)out.append(',');out.append('"').append(escape(warning)).append('"');
+            }
+            out.append("]}");writeJson(response,callback,200,out.toString());
+        }catch(IllegalArgumentException e) {
+            writeJson(response,callback,400,"{\"error\":\"INVALID_SCAN\",\"message\":\""+escape(e.getMessage())+"\"}");
+        }catch(RuntimeException e){serviceUnavailable(response,callback,e);}
+    }
     private void handleDiscoveryCreate(String id,Request request,Response response,Callback callback){try{long dataSourceId=Long.parseLong(id);String code=queryParameter(request,"code").trim().toUpperCase(java.util.Locale.ROOT);String name=queryParameter(request,"name").trim();if(!code.matches("[A-Z][A-Z0-9_]{2,99}")||name.isBlank())throw new IllegalArgumentException("A valid code and name are required");List<DiscoverySelection> selections=new java.util.ArrayList<>();for(String line:readBody(request).split("\\R")){if(line.isBlank())continue;String[] pair=line.split(",",2);if(pair.length!=2)throw new IllegalArgumentException("Invalid selection");selections.add(new DiscoverySelection(Long.parseLong(pair[0]),pair[1].trim()));}DiscoveryCreationResult result=discovery.createRuleset(dataSourceId,code,name,selections);assignOwner(request,result.rulesetId());writeJson(response,callback,201,"{\"rulesetId\":"+result.rulesetId()+",\"versionId\":"+result.versionId()+",\"code\":\""+escape(result.code())+"\",\"rulesCreated\":"+result.rulesCreated()+"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"INVALID_DISCOVERY_REQUEST\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(IllegalStateException e){writeJson(response,callback,409,"{\"error\":\"RULESET_ALREADY_EXISTS\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(Exception e){serviceUnavailable(response,callback,new IllegalStateException(e.getMessage(),e));}}
 
     private void handleRepositoryLogin(Request request, Response response, Callback callback) {

@@ -18,6 +18,7 @@ public interface DiscoveryUseCase {
     void deleteConnection(long dataSourceId);
     void updateConnection(long dataSourceId, ConnectionUpdateCommand command);
     DiscoveryScan scan(long dataSourceId);
+    default DiscoveryScan analyzeContent(long dataSourceId) { return scan(dataSourceId); }
     DiscoveryCreationResult createRuleset(long dataSourceId, String code, String name,
             List<DiscoverySelection> selections);
     DiscoveryCreationResult createEmptyRuleset(long dataSourceId, String code, String name);

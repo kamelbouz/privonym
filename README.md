@@ -195,5 +195,9 @@ Le catalogue et les extensions envisagées sont décrits dans
 Le premier lot d'extension ajoute quatre algorithmes portables ; voir
 [ALGORITHM_PALETTE.md](ALGORITHM_PALETTE.md) pour leurs paramètres et leur activation.
 
+La Discovery analyse aussi des échantillons de texte pour expliquer ses suggestions
+d'algorithmes. Ce traitement reste propre à la Discovery ; voir
+[DISCOVERY_TEXT.md](DISCOVERY_TEXT.md) pour les indices reconnus et les limites.
+
 Voir [CORRECTIONS.md](CORRECTIONS.md) pour les correctifs, les prérequis de
 configuration et les limites restant à qualifier.

@@ -19,6 +19,7 @@ public final class OracleDiscoveryClassifierSmokeCheck {
         require("ville_residence", "CITY", "LOOKUP_CITY");
         require("home_address", "POSTAL_ADDRESS", "LOOKUP_ADDRESS");
         require("adresse_client", "POSTAL_ADDRESS", "LOOKUP_ADDRESS");
+        DiscoveryTextSmokeCheck.main(arguments);
         System.out.println("Oracle Discovery classifier smoke check passed.");
     }
 

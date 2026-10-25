@@ -82,8 +82,10 @@ de l'anonymisation définitive.
    et composition des profils de texte. L'activation reste propre à l'installation.
 2. Construire les profils métier localisés avec cohérence entre colonnes,
    gestion de l'unicité et jeux de données de substitution documentés.
-3. Ajouter un processeur de texte indépendant du moteur cible pour la détection
-   contextuelle, avec langues, entités, seuils et traitement des textes longs.
+3. Limiter la détection contextuelle à Discovery pour proposer des algorithmes.
+   Un premier niveau local de formats et d'indices contextuels est livré dans
+   [DISCOVERY_TEXT.md](DISCOVERY_TEXT.md). Un modèle linguistique plus général,
+   avec langues explicites et corpus d'évaluation, reste à développer.
 4. Ajouter les traitements de documents, permutations et mappings persistants
    dont les garanties nécessitent un état d'exécution partagé.
 

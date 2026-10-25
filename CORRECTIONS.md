@@ -84,3 +84,13 @@ mal placé absorbait certains séparateurs et pouvait laisser un email apparent.
 Les essais synthétiques couvrent les trois moteurs, les valeurs limites, NULL,
 l'Unicode, les nombres négatifs et les textes longs. Détails et limites :
 [ALGORITHM_PALETTE.md](ALGORITHM_PALETTE.md).
+
+## Discovery : recommandations sur échantillons de texte
+
+L'action explicite Discovery analyse localement des préfixes de valeurs textuelles
+sur les trois moteurs. Elle distingue les formats dans le texte et certains indices
+de personne, adresse ou organisation, puis explique la proposition d'algorithme.
+Les propositions sont décochées et restent à valider. Les algorithmes indisponibles
+pour le moteur ne sont pas sélectionnés arbitrairement. Le moteur d'exécution
+n'appelle pas ce détecteur. Il n'y a ni nouveau modèle NER, ni service externe.
+Voir [DISCOVERY_TEXT.md](DISCOVERY_TEXT.md) pour le périmètre, les limites et les tests.

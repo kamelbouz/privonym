@@ -237,6 +237,11 @@ public final class HttpAdapterSmokeCheck {
             @Override public void deleteConnection(long id) { throw new UnsupportedOperationException(); }
             @Override public void updateConnection(long id,com.privonym.application.service.ConnectionUpdateCommand command) { throw new UnsupportedOperationException(); }
             @Override public com.privonym.application.service.DiscoveryScan scan(long id) { return new com.privonym.application.service.DiscoveryScan(id,"Test connection",true,List.of(),List.of()); }
+            @Override public com.privonym.application.service.DiscoveryScan analyzeContent(long id) {
+                return new com.privonym.application.service.DiscoveryScan(id,"Test connection",true,List.of(),List.of(
+                    new com.privonym.application.service.DiscoveryFinding(12,"APP","NOTES","BODY","CLOB","TEXT_SENSITIVE",75,"NULLIFY",
+                        "Context clues; whole-value removal. Review required.",List.of("PERSON_CONTEXT"),20)),List.of("Bounded samples only."));
+            }
             @Override public com.privonym.application.service.DiscoveryCreationResult createRuleset(long id,String code,String name,List<com.privonym.application.service.DiscoverySelection> selections) { throw new UnsupportedOperationException(); }
             @Override public com.privonym.application.service.DiscoveryCreationResult createEmptyRuleset(long id,String code,String name) { throw new UnsupportedOperationException(); }
         };
@@ -394,10 +399,15 @@ public final class HttpAdapterSmokeCheck {
             HttpResponse<String> discoveryPage = send(client, port, "/discovery", "GET");
             require(discoveryPage.statusCode() == 200
                             && discoveryPage.body().contains(
-                                    "payload.connections.filter(item=>!item.rulesetExists&&item.enabled)")
+                                    "payload.connections.filter(item=>item.enabled)")
                             && discoveryPage.body().contains(
-                                    "if(parameters.get('analyze')==='1')scanButton.click()"),
-                    "Discovery Rule Set creation must only offer unlinked enabled connections");
+                                    "check.checked=false")
+                            && !discoveryPage.body().contains("if(parameters.get('analyze')==='1')scanButton.click()"),
+                    "Discovery supports review of existing sources, requires explicit sampling and leaves suggestions unchecked");
+            HttpResponse<String> discoveryScan=send(client,port,"/api/v1/discovery/scan/1","POST");
+            require(discoveryScan.statusCode()==200&&discoveryScan.body().contains("\"detectedEntities\":[\"PERSON_CONTEXT\"]")
+                    &&discoveryScan.body().contains("\"sampledValues\":20")&&discoveryScan.body().contains("\"warnings\":[\"Bounded samples only.\"]"),
+                    "explicit Discovery endpoint must use content analysis and expose evidence without samples");
 
             HttpResponse<String> connectionsPage = send(client, port, "/connections", "GET");
             require(connectionsPage.statusCode() == 200

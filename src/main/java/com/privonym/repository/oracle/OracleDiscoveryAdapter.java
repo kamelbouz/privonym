@@ -360,6 +360,25 @@ public final class OracleDiscoveryAdapter implements DiscoveryUseCase, AutoClose
         }catch(SQLException e){throw failure("scan catalog",e);}
     }
 
+    @Override public DiscoveryScan analyzeContent(long dataSourceId) {
+        DiscoveryScan metadata=scan(dataSourceId);
+        try(Connection repository=open(true);PreparedStatement query=repository.prepareStatement(
+                "SELECT c.technology_code,c.host_name,c.port,c.service_name,c.database_name,c.username_value,c.encrypted_password FROM data_source d JOIN connector c ON c.connector_id=d.connector_id WHERE d.data_source_id=?")) {
+            query.setLong(1,dataSourceId);
+            try(ResultSet row=query.executeQuery()) {
+                if(!row.next())throw new IllegalArgumentException("Connection not found");
+                String technology=row.getString(1);
+                var details=new OracleConnectionDetails(technology,row.getString(2),row.getInt(3),row.getString(4),row.getString(5),row.getString(6));
+                char[] targetPassword=decrypt(row.getString(7));
+                try(Connection target=DriverManager.getConnection(details.jdbcUrl(),details.username(),new String(targetPassword))) {
+                    target.setAutoCommit(false);target.setReadOnly(true);
+                    DiscoveryScan result=DiscoveryContentScan.analyze(repository,target,dataSourceId,technology,metadata);
+                    target.rollback();return result;
+                } finally {Arrays.fill(targetPassword,'\0');}
+            }
+        }catch(SQLException error){throw failure("analyze Discovery text samples",error);}
+    }
+
     @Override public DiscoveryCreationResult createRuleset(long dataSourceId,String code,String name,List<DiscoverySelection> selections){
         if(selections.isEmpty())throw new IllegalArgumentException("Select at least one sensitive column");return createRulesetInternal(dataSourceId,code,name,selections);}
     private DiscoveryCreationResult createRulesetInternal(long dataSourceId,String code,String name,List<DiscoverySelection> selections){

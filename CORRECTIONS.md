@@ -119,3 +119,7 @@ copiés avant l'application des propositions sélectionnées. Aucun second Rule 
 n'est créé, aucun brouillon existant n'est écrasé et aucun propriétaire n'est changé.
 La création est transactionnelle et exige les droits de modification du propriétaire
 ou un compte administrateur. Les règles publiées et jobs restent inchangés.
+
+## Surveillance d'exécution et journalisation
+
+Correction du timeout de contrôle isolé trop sévère, conservation de la cause SQL et arrêt des workers sans interrompre leur rollback/journal. Détails et limites dans [LOT2_EXECUTION.md](LOT2_EXECUTION.md).

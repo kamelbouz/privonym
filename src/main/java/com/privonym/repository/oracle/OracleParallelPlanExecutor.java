@@ -393,7 +393,10 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                         }
                         throw new JobExecutionCancelledException(activeJobId, error);
                     }
-                    failChunk(repository, chunkId, error);
+                    RuntimeException controlFailure=null;
+                    if(executionControl!=null)try{executionControl.check();}catch(RuntimeException cause){controlFailure=cause;}
+                    failChunk(repository, chunkId, controlFailure==null?error:controlFailure);
+                    if(controlFailure!=null){if(controlFailure!=error)controlFailure.addSuppressed(error);throw controlFailure;}
                     throw new IllegalStateException("Step " + step.stepNumber() + ", chunk "
                             + range.number() + " failed: " + error.getMessage(), error);
                 }
@@ -1045,16 +1048,18 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
         return cause == null ? error : cause;
     }
 
-    private static void shutdownAndAwait(ExecutorService executor) {
+    private void shutdownAndAwait(ExecutorService executor) {
         if (executor == null) return;
-        executor.shutdownNow();
+        // SQL cancellation is explicit; never interrupt a worker while it rolls
+        // back its target transaction or persists the confirmed outcome.
+        executor.shutdown();
         boolean interrupted = false;
         while (!executor.isTerminated()) {
             try {
                 executor.awaitTermination(1, TimeUnit.SECONDS);
             } catch (InterruptedException error) {
                 interrupted = true;
-                executor.shutdownNow();
+                requestCancellation();
             }
         }
         if (interrupted) Thread.currentThread().interrupt();

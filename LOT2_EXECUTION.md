@@ -31,3 +31,13 @@ Aucune migration de schéma n'est nécessaire. Les anciens journaux sont conserv
 Compilation et tests : .\build.cmd -JdkHome 'C:\Program Files\Java\jdk-17'. Les tests injectent des pertes de réponse au commit, échecs de rollback et de checkpoint, annulations externes et changements de propriétaire dans des doubles JDBC isolés ; ils vérifient les droits HTTP et la conservation des chunks réussis sur Oracle, PostgreSQL et SQL Server. Ces tests ne remplacent pas une campagne de charge et de coupures réseau réelles sur les trois moteurs.
 
 Les JAR installés nécessitent un redémarrage normal de Privonym pour être chargés. Aucun serveur caché n'est démarré par cette livraison.
+
+## Correctif de surveillance et d'arrêt des workers — 8 novembre 2026
+
+Un timeout isolé de la requête de surveillance (SQLTimeoutException ou Oracle ORA-01013) est réessayé après rollback de la connexion de contrôle. Trois timeouts consécutifs provoquent l'arrêt ; une perte de propriétaire, une annulation utilisateur ou une autre erreur reste bloquante immédiatement. Chaque commit cible exige toujours une nouvelle lecture verrouillée du propriétaire dans le référentiel : aucune tolérance n'est ajoutée à cette barrière.
+
+Une erreur de contrôle conserve maintenant sa cause SQL, son code fournisseur et son SQLState dans le message du job et la console serveur. Les workers ne remplacent plus cette cause par le simple message d'annulation de la requête cible. Le pool utilise un arrêt sans interruption des threads JDBC pour laisser finir rollback et journalisation ; l'interruption du caller est conservée et la demande d'annulation SQL reste explicite.
+
+Tests : timeout isolé récupéré sans annulation SQL, timeouts répétés bloquants avec cause conservée, perte de connexion/propriétaire, fin du rollback/journal malgré un caller interrompu. ExecutionControlOracleIntegrationCheck qualifie le heartbeat et une contention réelle de la barrière de commit Oracle sur un job synthétique dédié, supprimé en fin de test, sans SQL métier.
+
+Les anciens messages génériques ne permettent pas de retrouver rétroactivement la cause précise d'un incident de contrôle. Les chunks déjà incertains restent soumis au parcours de récupération ; aucun RUNNING historique n'est automatiquement déclaré annulé ou réessayable par cette correction.

@@ -9,6 +9,8 @@ import java.util.concurrent.TimeUnit;
 final class Lot2RecoverySmokeCheck {
     volatile String status="RUNNING",identity="attempt-1";
     volatile boolean disconnected;
+    final java.util.concurrent.atomic.AtomicInteger queryTimeouts=new java.util.concurrent.atomic.AtomicInteger();
+    final CountDownLatch timeoutObserved=new CountDownLatch(1);
     final CountDownLatch cancelled=new CountDownLatch(1);
     static void verify() throws Exception {
         rejects(()->ExecutionRecoveryPolicy.requireSameVersion(true,12,13));
@@ -34,6 +36,17 @@ final class Lot2RecoverySmokeCheck {
                 control.untrack(statement);
             }
         }
+        for(int failures:new int[]{1,3}) {
+            Lot2RecoverySmokeCheck timed=new Lot2RecoverySmokeCheck();
+            try(JobExecutionControl control=new JobExecutionControl(950+failures,timed.connection(),timed::connection,null)) {
+                Statement tracked=(Statement)Proxy.newProxyInstance(Statement.class.getClassLoader(),new Class<?>[]{Statement.class},(p,m,a)->{if(m.getName().equals("cancel"))timed.cancelled.countDown();return value(m.getReturnType());});
+                control.track(tracked);timed.queryTimeouts.set(failures);
+                require(timed.timeoutObserved.await(3,TimeUnit.SECONDS),"monitor timeout must be injected");
+                if(failures==1){Thread.sleep(900);control.check();control.beforeCommit(timed.connection());require(timed.cancelled.getCount()==1,"one polling timeout must not cancel target SQL");}
+                else{require(timed.cancelled.await(4,TimeUnit.SECONDS),"repeated polling timeouts must stop target SQL");try{control.check();throw new AssertionError("Persistent timeout accepted");}catch(IllegalStateException expected){require(expected.getMessage().contains("SQL code=1013")&&expected.getMessage().contains("injected monitor timeout"),"SQL cause must survive into the Job error");}}
+                control.untrack(tracked);
+            }
+        }
         Lot2RecoverySmokeCheck db=new Lot2RecoverySmokeCheck();
         try(JobExecutionControl c=new JobExecutionControl(999,db.connection(),null,null)) {
             db.identity="reclaimed";rejects(()->{try{c.beforeCommit(db.connection());}catch(SQLException e){throw new IllegalStateException(e);}});
@@ -46,6 +59,7 @@ final class Lot2RecoverySmokeCheck {
     PreparedStatement statement(String sql){return (PreparedStatement)Proxy.newProxyInstance(PreparedStatement.class.getClassLoader(),new Class<?>[]{PreparedStatement.class},(p,m,a)->{
         if(m.getName().equals("executeQuery")) {
             if(disconnected)throw new SQLException("Injected control connection outage");
+            if(queryTimeouts.getAndUpdate(n->Math.max(0,n-1))>0){timeoutObserved.countDown();throw new SQLTimeoutException("injected monitor timeout", "HYT00",1013);}
             boolean[] seen={false};String s=status,i=identity;
             return Proxy.newProxyInstance(ResultSet.class.getClassLoader(),new Class<?>[]{ResultSet.class},(r,n,b)->switch(n.getName()){
                 case "next" -> {boolean first=!seen[0];seen[0]=true;yield first;}

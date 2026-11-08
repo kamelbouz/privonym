@@ -6,6 +6,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.sql.SQLTimeoutException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -23,6 +24,8 @@ final class JobExecutionControl implements AutoCloseable {
     private final ScheduledExecutorService monitor;
     private final Connection monitorConnection;
     private volatile boolean cancelled;
+    private volatile boolean closing;
+    private int consecutiveTimeouts;
     private volatile RuntimeException unavailable;
 
     JobExecutionControl(long jobId,Connection repository,ExecutionControlConnections connections,Runnable hook)throws SQLException {
@@ -69,17 +72,35 @@ final class JobExecutionControl implements AutoCloseable {
             try(PreparedStatement lock=monitorConnection.prepareStatement("SELECT job_id FROM anonymization_job WHERE job_id=? FOR UPDATE NOWAIT")) {
                 lock.setLong(1,jobId);lock.setQueryTimeout(2);
                 try(ResultSet row=lock.executeQuery()){if(!row.next())throw new SQLException("Execution owner missing");}
-            }catch(SQLException busy){monitorConnection.rollback();if(busy.getErrorCode()==54)return;throw busy;}
+            }catch(SQLException busy){monitorConnection.rollback();if(busy.getErrorCode()==54){consecutiveTimeouts=0;return;}throw busy;}
             try(PreparedStatement heartbeat=monitorConnection.prepareStatement("UPDATE anonymization_job SET heartbeat_at=SYSTIMESTAMP WHERE job_id=? AND status IN('RUNNING','RETRYING') AND "+IDENTITY+"=?")) {
                 heartbeat.setLong(1,jobId);heartbeat.setString(2,identity);heartbeat.setQueryTimeout(2);
                 if(heartbeat.executeUpdate()!=1)throw new IllegalStateException("Execution owner changed");
             }
             monitorConnection.commit();
+            consecutiveTimeouts=0;
         }catch(JobExecutionCancelledException expected){cancel();}
-        catch(SQLException|RuntimeException error){unavailable=new IllegalStateException("Execution control unavailable; target commits are blocked",error);cancelStatements();}
+        catch(SQLException|RuntimeException error){
+            if(closing)return;
+            // A single monitor query timeout does not prove loss of ownership. Every
+            // target commit still requires a fresh, locked repository ownership read.
+            if(isQueryTimeout(error)&&++consecutiveTimeouts<3) {
+                try{monitorConnection.rollback();return;}catch(SQLException rollback){error.addSuppressed(rollback);}
+            }
+            String detail=error.getClass().getSimpleName()+": "+String.valueOf(error.getMessage());
+            if(error instanceof SQLException sql)detail="SQL code="+sql.getErrorCode()+", state="+sql.getSQLState()+", "+detail;
+            unavailable=new IllegalStateException("Execution control unavailable; target commits are blocked. Cause: "+detail,error);
+            try{monitorConnection.rollback();}catch(SQLException rollback){error.addSuppressed(rollback);}
+            System.err.println("Job "+jobId+": "+unavailable.getMessage());
+            cancelStatements();
+        }
+    }
+    private static boolean isQueryTimeout(Throwable error) {
+        return error instanceof SQLTimeoutException||error instanceof SQLException sql&&sql.getErrorCode()==1013;
     }
     private void cancelStatements(){for(Statement statement:statements)try{statement.cancel();}catch(SQLException ignored){/* fence remains mandatory */}}
     @Override public void close() {
+        closing=true;
         ACTIVE.remove(jobId,this);
         if(monitor!=null){monitor.shutdownNow();try{monitor.awaitTermination(6,TimeUnit.SECONDS);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();}}
         if(monitorConnection!=null)try{monitorConnection.close();}catch(SQLException ignored){/* no target transaction here */}

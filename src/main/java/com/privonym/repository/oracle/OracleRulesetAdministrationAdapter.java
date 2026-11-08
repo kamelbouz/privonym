@@ -495,7 +495,13 @@ public final class OracleRulesetAdministrationAdapter
     @Override
     public void reconcile(long jobId,long chunkId,String decision,long rows,String note,String confirmation,String actor) {
         try(Connection c=open(false)) {
-            try {JobRecoveryRepository.reconcile(c,jobId,chunkId,decision,rows,note,confirmation,actor);c.commit();}
+            try {
+                if("VERIFY_ROLLBACK".equals(decision)) {
+                    try(var verified=OracleChunkRollbackVerifier.verify(c,jobId,chunkId)) {
+                        JobRecoveryRepository.reconcile(c,jobId,chunkId,"ROLLBACK",0,verified.evidence(),"RECONCILE JOB "+jobId+" CHUNK "+chunkId,actor);c.commit();
+                    }
+                }else{JobRecoveryRepository.reconcile(c,jobId,chunkId,decision,rows,note,confirmation,actor);c.commit();}
+            }
             catch(SQLException|RuntimeException e){c.rollback();throw e;}
         } catch(SQLException e){throw failure("reconcile Job",e);}
     }

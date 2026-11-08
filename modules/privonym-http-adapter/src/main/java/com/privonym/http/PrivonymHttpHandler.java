@@ -1147,7 +1147,7 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             if("POST".equals(request.getMethod())) {
                 if(applicationSecurity==null||user==null||!user.administrator()){forbidden(response,callback,"Recovery decisions require an administrator");return;}
                 var f=parseFormParameters(readBody(request));
-                if(!"true".equals(f.get("verified")))throw new IllegalArgumentException("Verify the target outcome and stop the runner before confirming");
+                if(!"VERIFY_ROLLBACK".equals(f.get("decision"))&&!"true".equals(f.get("verified")))throw new IllegalArgumentException("Verify the target outcome and stop the runner before confirming");
                 rulesets.reconcile(id,Long.parseLong(f.getOrDefault("chunkId","0")),f.get("decision"),Long.parseLong(f.getOrDefault("rows","0")),f.get("note"),f.get("confirmation"),user.username());
             } else if(!requireGet(request,response,callback))return;
             var view=rulesets.recovery(id);

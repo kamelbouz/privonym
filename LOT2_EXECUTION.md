@@ -1,5 +1,7 @@
 # Lot 2 — Exécution et reprise — 8 novembre 2026
 
+Reprise vérifiée sans intervention SQL : [REPRISE_ORACLE.md](REPRISE_ORACLE.md).
+
 ## Comportement
 
 - Une reprise garde sa version publiée du Rule Set, le SQL planifié, sa stratégie et la taille des chunks. Publier une nouvelle version ne rebranche plus silencieusement un ancien job. Créer un nouveau job pour changer de version.

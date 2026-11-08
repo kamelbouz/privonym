@@ -756,13 +756,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
     }
 
     static void requireReconciledChunks(Connection repository, long stepId) throws SQLException {
-        try (PreparedStatement statement = repository.prepareStatement("""
-                SELECT COUNT(*) FROM job_chunk WHERE job_step_id=?
-                  AND (status NOT IN ('SUCCEEDED','FAILED')
-                       AND NOT (status='CANCELLED'
-                                AND COALESCE(error_message,'UNKNOWN')
-                                    LIKE 'PRIVONYM-ROLLBACK-CONFIRMED:%'))
-                """)) {
+        try (PreparedStatement statement = repository.prepareStatement("SELECT COUNT(*) FROM job_chunk WHERE job_step_id=? AND "+ChunkRecoveryState.unresolvedSql(""))) {
             statement.setLong(1, stepId);
             try (ResultSet row = statement.executeQuery()) {
                 row.next();

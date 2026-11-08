@@ -15,6 +15,9 @@ final class Lot2RecoverySmokeCheck {
     final CountDownLatch timeoutObserved=new CountDownLatch(1);
     final CountDownLatch cancelled=new CountDownLatch(1);
     static void verify() throws Exception {
+        require(!ChunkRecoveryState.resolved("FAILED",null,false),"manually changed FAILED without evidence remains uncertain");
+        require(ChunkRecoveryState.resolved("FAILED","ORA-01013",true),"confirmed failed chunks remain retryable");
+        require(ChunkRecoveryState.resolved("SUCCEEDED",null,true),"successful checkpoints remain preserved");
         rejects(()->ExecutionRecoveryPolicy.requireSameVersion(true,12,13));
         ExecutionRecoveryPolicy.requireSameVersion(true,12,12);
         rejects(()->ExecutionRecoveryPolicy.requireSameGeometry("EXECUTION_FAILED",true,"CHUNKED",1000,1000,"DIRECT",1000,1000));

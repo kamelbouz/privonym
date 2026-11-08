@@ -11,7 +11,7 @@ import java.util.List;
 /** Operator-only decisions, never inferred from a stale timestamp or zero rows. */
 final class JobRecoveryRepository {
     private JobRecoveryRepository() { }
-    static boolean terminal(String status){return List.of("EXECUTION_FAILED","CANCELLED","FAILED","VALIDATION_FAILED").contains(status);}
+    static boolean terminal(String status){return List.of("EXECUTION_FAILED","CANCELLED","FAILED","VALIDATION_FAILED","PLANNED","PREFLIGHT_PASSED").contains(status);}
     static void requireDecision(long jobId,long chunkId,String decision,long rows,String note,String confirmation) {
         if(decision==null||!List.of("ROLLBACK","COMMIT","STOPPED").contains(decision)||(!decision.equals("STOPPED")&&chunkId<=0)||rows<0||note==null||note.strip().length()<15||note.length()>2000)
             throw new IllegalArgumentException("Recovery requires a decision, non-negative rows and a verification note of 15 to 2000 characters");
@@ -58,10 +58,11 @@ final class JobRecoveryRepository {
             }}
         }
         List<JobRecoveryView.Chunk> chunks=new ArrayList<>();
-        try(PreparedStatement q=c.prepareStatement("SELECT c.chunk_id,c.job_step_id,c.chunk_number,c.status,c.rows_processed,c.error_message FROM job_chunk c JOIN job_step s ON s.job_step_id=c.job_step_id WHERE s.job_id=? AND c.status<>'SUCCEEDED' ORDER BY c.job_step_id,c.chunk_number")) {
+        try(PreparedStatement q=c.prepareStatement("SELECT c.chunk_id,c.job_step_id,c.chunk_number,c.status,c.rows_processed,c.error_message,c.ended_at FROM job_chunk c JOIN job_step s ON s.job_step_id=c.job_step_id WHERE s.job_id=? AND c.status<>'SUCCEEDED' ORDER BY c.job_step_id,c.chunk_number")) {
             q.setLong(1,jobId);try(ResultSet r=q.executeQuery()){while(r.next()) {
-                String state=r.getString(4),detail=r.getString(6);if(detail==null)detail="No confirmed target outcome recorded";
-                boolean unresolved=!state.equals("FAILED")&&!(state.equals("CANCELLED")&&detail.startsWith("PRIVONYM-ROLLBACK-CONFIRMED:"));
+                String state=r.getString(4),detail=r.getString(6);
+                boolean unresolved=!ChunkRecoveryState.resolved(state,detail,r.getTimestamp(7)!=null);
+                if(detail==null)detail=unresolved?"Target outcome not confirmed; verify historical data before retry":"No additional error detail";
                 chunks.add(new JobRecoveryView.Chunk(r.getLong(1),r.getLong(2),r.getInt(3),state,r.getLong(5),detail,unresolved));
             }}
         }
@@ -78,11 +79,11 @@ final class JobRecoveryRepository {
             try(PreparedStatement q=c.prepareStatement("UPDATE anonymization_job SET status='EXECUTION_FAILED',ended_at=SYSTIMESTAMP,error_code='RECOVERY_REQUIRED',error_message='Operator confirmed stopped runner; chunks still require reconciliation' WHERE job_id=?")){q.setLong(1,jobId);q.executeUpdate();}
         } else {
             if(!terminal(status))throw new IllegalStateException("Stop the runner and wait for a terminal Job state before reconciling chunks");
-            try(PreparedStatement q=c.prepareStatement("SELECT c.status,c.error_message FROM job_chunk c JOIN job_step s ON s.job_step_id=c.job_step_id WHERE c.chunk_id=? AND s.job_id=? FOR UPDATE OF c.status")) {
+            try(PreparedStatement q=c.prepareStatement("SELECT c.status,c.error_message,c.ended_at FROM job_chunk c JOIN job_step s ON s.job_step_id=c.job_step_id WHERE c.chunk_id=? AND s.job_id=? FOR UPDATE OF c.status")) {
                 q.setLong(1,chunkId);q.setLong(2,jobId);try(ResultSet r=q.executeQuery()) {
                     if(!r.next())throw new IllegalArgumentException("Chunk does not belong to this Job");
                     String old=r.getString(1),detail=r.getString(2);
-                    if(old.equals("SUCCEEDED")||old.equals("FAILED")||old.equals("CANCELLED")&&detail!=null&&detail.startsWith("PRIVONYM-ROLLBACK-CONFIRMED:"))throw new IllegalStateException("Chunk is already reconciled; its checkpoint is preserved");
+                    if(ChunkRecoveryState.resolved(old,detail,r.getTimestamp(3)!=null))throw new IllegalStateException("Chunk is already reconciled; its checkpoint is preserved");
                 }
             }
             try(PreparedStatement q=c.prepareStatement("UPDATE job_chunk SET status=?,rows_processed=?,ended_at=SYSTIMESTAMP,error_message=? WHERE chunk_id=?")) {

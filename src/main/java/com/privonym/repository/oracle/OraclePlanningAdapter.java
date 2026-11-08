@@ -153,7 +153,7 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
                 SELECT job_step_id, step_number, generated_code, generated_code_checksum
                   FROM job_step
                  WHERE job_id = ? AND step_type = 'ANONYMIZE_TABLE'
-                   AND status IN ('READY','FAILED')
+                   AND status IN ('READY','FAILED','SUCCEEDED','PENDING','CANCELLED')
                  ORDER BY step_number
                 """;
         List<ExecutableStep> steps = new ArrayList<>();

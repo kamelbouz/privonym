@@ -1,5 +1,7 @@
 # Corrections du 24 octobre 2026
 
+Reprise vérifiée sans intervention SQL : [REPRISE_ORACLE.md](REPRISE_ORACLE.md).
+
 Lot 3 — référentiel et reproductibilité : [LOT3_REFERENTIEL.md](LOT3_REFERENTIEL.md).
 
 Lot 2 — exécution et reprise : [LOT2_EXECUTION.md](LOT2_EXECUTION.md).

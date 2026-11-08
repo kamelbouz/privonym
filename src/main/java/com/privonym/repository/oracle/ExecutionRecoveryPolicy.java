@@ -26,11 +26,7 @@ final class ExecutionRecoveryPolicy {
         }
     }
     static void requireReconciled(Connection c,long jobId)throws SQLException {
-        try(PreparedStatement q=c.prepareStatement("""
-                SELECT COUNT(*) FROM job_chunk c JOIN job_step s ON s.job_step_id=c.job_step_id
-                WHERE s.job_id=? AND c.status NOT IN('SUCCEEDED','FAILED')
-                  AND NOT(c.status='CANCELLED' AND COALESCE(c.error_message,'UNKNOWN') LIKE 'PRIVONYM-ROLLBACK-CONFIRMED:%')
-                """)) {
+        try(PreparedStatement q=c.prepareStatement("SELECT COUNT(*) FROM job_chunk c JOIN job_step s ON s.job_step_id=c.job_step_id WHERE s.job_id=? AND "+ChunkRecoveryState.unresolvedSql("c"))) {
             q.setLong(1,jobId);try(ResultSet r=q.executeQuery()){r.next();if(r.getLong(1)>0)throw new IllegalStateException("Recovery verification required: inspect the Job recovery panel before retrying unreconciled chunks");}
         }
     }

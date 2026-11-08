@@ -168,4 +168,5 @@ public final class RulesetAdministrationService implements RulesetAdministration
         }
         return repository.exportSql(rulesetId, versionId);
     }
+    @Override public long currentRulesetId(long source){return repository.currentRulesetId(source);}
 }

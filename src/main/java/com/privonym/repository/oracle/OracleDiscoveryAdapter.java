@@ -41,10 +41,7 @@ public final class OracleDiscoveryAdapter implements DiscoveryUseCase, AutoClose
         this.jdbcUrl=Objects.requireNonNull(jdbcUrl); this.username=Objects.requireNonNull(username);
         this.password=Objects.requireNonNull(password).clone();
         this.localSecretKey=loadOrCreateLocalSecretKey();
-        ensureCredentialColumns();
-        ensureCatalogRescanSupport();
-        ensurePostgresqlAlgorithmImplementations();
-        ensureSqlServerAlgorithmImplementations();
+        // Repository schema and seed data are installed explicitly through migrations.
     }
 
     @Override public List<DiscoveryConnection> listConnections() {

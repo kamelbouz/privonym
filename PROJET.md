@@ -1,5 +1,7 @@
 # Projet Privonym
 
+Lot 3 — référentiel et reproductibilité : [LOT3_REFERENTIEL.md](LOT3_REFERENTIEL.md).
+
 État de référence : code importé en version 2.5.0, commit `04825f7` du
 19 septembre 2026. Analyse initiale réalisée le 24 octobre 2026.
 Ce document décrit le dépôt ; il ne certifie pas une installation en production.

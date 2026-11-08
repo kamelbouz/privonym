@@ -61,6 +61,7 @@ public final class DiscoveryDraftIntegrationCheck {
                 var before=c.setSavepoint();
                 var result=DiscoveryDraftWriter.create(c,ruleset,List.of(new DiscoverySelection(columns[0],tag),new DiscoverySelection(columns[1],"NULLIFY"),new DiscoverySelection(columns[2],"NULLIFY")),"synthetic");
                 long draft=result.versionId();
+                verifyLot3(c,ds,ruleset,source,table,tag);
                 require(result.rulesetId()==ruleset&&result.versionNumber()==6&&!result.newRuleset(),"must create same Rule Set v6");
                 require(number(c,"SELECT COUNT(*) FROM ruleset WHERE data_source_id=?",ds)==1,"one Rule Set invariant");
                 require(number(c,"SELECT COUNT(*) FROM masking_rule WHERE ruleset_version_id=?",draft)==3,"must merge new and existing columns");
@@ -85,6 +86,30 @@ public final class DiscoveryDraftIntegrationCheck {
                 System.out.println("Discovery draft integration passed: same Rule Set v5 -> v6, full rule copy, parameter preservation, selected overrides, existing draft guard and rollback. All synthetic fixtures rolled back.");
             } finally {c.rollback();}
         }
+    }
+    private static void verifyLot3(Connection c,long ds,long ruleset,long source,long table,String tag)throws Exception {
+        var checkpoint=c.setSavepoint();
+        var method=OracleDraftInventoryAdapter.class.getDeclaredMethod("createVersion",Connection.class,long.class,String.class);method.setAccessible(true);
+        boolean rejected=false;try{method.invoke(null,c,ruleset,"synthetic");}catch(java.lang.reflect.InvocationTargetException e){rejected=e.getCause() instanceof IllegalStateException;}
+        require(rejected,"Transformer must reject an existing DRAFT before inserting");
+        expectSqlCode(c,"INSERT INTO ruleset_version(ruleset_id,version_number,status) VALUES(?,9999,'DRAFT')",1,ruleset);
+        expectSqlCode(c,"INSERT INTO ruleset(data_source_id,code,name) VALUES(?,?,?)",20071,ds,tag+"_DUP",tag);
+        execute(c,"INSERT INTO anonymization_job(job_reference,data_source_id,ruleset_version_id) VALUES(?,?,?)",tag,ds,source);
+        long job=number(c,"SELECT job_id FROM anonymization_job WHERE job_reference=?",tag);
+        execute(c,"INSERT INTO job_step(job_id,step_number,step_type,catalog_table_id) VALUES(?,10,'ANONYMIZE_TABLE',?)",job,table);
+        long step=number(c,"SELECT job_step_id FROM job_step WHERE job_id=?",job);
+        String uuid=UUID.randomUUID().toString(),longKey="K".repeat(2000);
+        execute(c,"INSERT INTO job_chunk(job_step_id,chunk_number,status,start_rowid,end_rowid) VALUES(?,1,'RUNNING',?,?)",step,uuid,longKey);
+        require(number(c,"SELECT LENGTH(end_rowid) FROM job_chunk WHERE job_step_id=?",step)==2000,"portable journal must store 2000-character keys");
+        long value=number(c,"SELECT MIN(v.lookup_value_id) FROM lookup_dataset_value v JOIN algorithm_lookup_config x ON x.lookup_dataset_id=v.lookup_dataset_id JOIN algorithm_version a ON a.algorithm_version_id=x.algorithm_version_id WHERE a.status='PUBLISHED'");
+        expectSqlCode(c,"UPDATE lookup_dataset_value SET enabled=enabled WHERE lookup_value_id=?",20072,value);
+        long config=number(c,"SELECT MIN(x.algorithm_version_id) FROM algorithm_lookup_config x JOIN algorithm_version a ON a.algorithm_version_id=x.algorithm_version_id WHERE a.status='PUBLISHED'");
+        expectSqlCode(c,"UPDATE algorithm_lookup_config SET lookup_dataset_id=lookup_dataset_id WHERE algorithm_version_id=?",20073,config);
+        new OraclePlanningAdapter(c);c.rollback(checkpoint);
+        System.out.println("Lot 3 Oracle integration passed: import draft guard, database draft uniqueness, duplicate Rule Set rejection, UUID/2000-char boundaries, frozen lookup values/bindings and constructor rollback safety.");
+    }
+    private static void expectSqlCode(Connection c,String sql,int code,Object... values)throws Exception {
+        try{execute(c,sql,values);}catch(java.sql.SQLException e){if(e.getErrorCode()==code)return;throw e;}throw new AssertionError("Expected Oracle error "+code);
     }
     private static void execute(Connection c,String sql,Object... values)throws Exception {
         try(PreparedStatement s=c.prepareStatement(sql)){for(int i=0;i<values.length;i++)s.setObject(i+1,values[i]);s.executeUpdate();}

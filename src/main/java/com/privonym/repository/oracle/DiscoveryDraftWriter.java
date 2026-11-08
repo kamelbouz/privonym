@@ -19,14 +19,15 @@ final class DiscoveryDraftWriter {
                 SELECT r.ruleset_id,r.code,r.name,NVL(MAX(v.version_number),0),
                        MAX(CASE WHEN v.status='DRAFT' THEN v.ruleset_version_id END)
                   FROM ruleset r LEFT JOIN ruleset_version v ON v.ruleset_id=r.ruleset_id
-                 WHERE r.data_source_id=? GROUP BY r.ruleset_id,r.code,r.name
+                 WHERE r.data_source_id=? AND (NOT EXISTS(SELECT 1 FROM connection_ruleset_binding b WHERE b.data_source_id=r.data_source_id) OR EXISTS(SELECT 1 FROM connection_ruleset_binding b WHERE b.data_source_id=r.data_source_id AND b.ruleset_id=r.ruleset_id)) GROUP BY r.ruleset_id,r.code,r.name
                 """)) {
             query.setLong(1,dataSourceId);
             try(ResultSet row=query.executeQuery()) {
                 if(!row.next())return null;
                 long draft=row.getLong(5);Long draftId=row.wasNull()?null:draft;
-                return new DiscoveryRulesetContext(row.getLong(1),row.getString(2),row.getString(3),row.getInt(4),
-                        Math.addExact(row.getInt(4),1),draftId);
+                var result=new DiscoveryRulesetContext(row.getLong(1),row.getString(2),row.getString(3),row.getInt(4),Math.addExact(row.getInt(4),1),draftId);
+                if(row.next())throw new IllegalStateException("Several historical Rule Sets exist for this connection; designate its current Rule Set before Discovery");
+                return result;
             }
         }
     }

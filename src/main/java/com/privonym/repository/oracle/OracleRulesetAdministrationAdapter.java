@@ -89,6 +89,11 @@ public final class OracleRulesetAdministrationAdapter
         this.password = Objects.requireNonNull(password, "password").clone();
     }
 
+    @Override public long currentRulesetId(long source) {
+        try(Connection c=open(true);PreparedStatement q=c.prepareStatement("SELECT r.ruleset_id FROM ruleset r WHERE r.data_source_id=? AND (NOT EXISTS(SELECT 1 FROM connection_ruleset_binding b WHERE b.data_source_id=r.data_source_id) OR EXISTS(SELECT 1 FROM connection_ruleset_binding b WHERE b.data_source_id=r.data_source_id AND b.ruleset_id=r.ruleset_id)) ORDER BY r.ruleset_id FETCH FIRST 2 ROWS ONLY")) {
+            q.setLong(1,source);try(ResultSet r=q.executeQuery()){if(!r.next())return 0;long id=r.getLong(1);if(r.next())throw new IllegalStateException("Several historical Rule Sets exist; designate the current Rule Set for this connection");return id;}
+        }catch(SQLException e){throw failure("resolve connection Rule Set",e);}
+    }
     @Override
     public List<RulesetSummary> list() {
         String sql = SUMMARY_SELECT + " ORDER BY e.name, ds.name, r.name";
@@ -154,6 +159,7 @@ public final class OracleRulesetAdministrationAdapter
                     statement.setLong(1, rulesetId);
                     statement.executeUpdate();
                 }
+                try(PreparedStatement binding=connection.prepareStatement("DELETE FROM connection_ruleset_binding WHERE ruleset_id=?")){binding.setLong(1,rulesetId);binding.executeUpdate();}
                 try (PreparedStatement statement = connection.prepareStatement(
                         "DELETE FROM ruleset WHERE ruleset_id = ?")) {
                     statement.setLong(1, rulesetId);

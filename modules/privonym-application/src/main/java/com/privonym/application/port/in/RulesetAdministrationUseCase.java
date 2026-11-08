@@ -34,4 +34,5 @@ public interface RulesetAdministrationUseCase {
     default void reconcile(long jobId,long chunkId,String decision,long rows,String note,String confirmation,String actor){throw new UnsupportedOperationException("Job recovery unavailable");}
     void saveJobScript(String reference, String phase, String fileName, String content);
     RulesetSqlExport exportSql(long rulesetId, long versionId);
+    default long currentRulesetId(long source) {var candidates=listRulesets().stream().filter(r->r.dataSourceId()==source).toList();if(candidates.size()>1)throw new IllegalStateException("Designate the current Rule Set for this connection");return candidates.isEmpty()?0:candidates.get(0).id();}
 }

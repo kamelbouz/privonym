@@ -1,5 +1,7 @@
 # Corrections du 24 octobre 2026
 
+Lot 3 — référentiel et reproductibilité : [LOT3_REFERENTIEL.md](LOT3_REFERENTIEL.md).
+
 Lot 2 — exécution et reprise : [LOT2_EXECUTION.md](LOT2_EXECUTION.md).
 
 ## Lot 1 du 8 novembre 2026

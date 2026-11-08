@@ -110,7 +110,7 @@ public final class OracleDraftInventoryAdapter implements DraftInventoryReposito
         // must never create a second Rule Set for an already-bound connection.
         try (PreparedStatement statement = connection.prepareStatement("""
                 SELECT ruleset_id, code FROM ruleset
-                 WHERE data_source_id = ?
+                 WHERE data_source_id = ? AND (NOT EXISTS(SELECT 1 FROM connection_ruleset_binding b WHERE b.data_source_id=ruleset.data_source_id) OR EXISTS(SELECT 1 FROM connection_ruleset_binding b WHERE b.data_source_id=ruleset.data_source_id AND b.ruleset_id=ruleset.ruleset_id))
                  ORDER BY ruleset_id FETCH FIRST 2 ROWS ONLY
                 """)) {
             statement.setLong(1, dataSourceId);
@@ -197,6 +197,9 @@ public final class OracleDraftInventoryAdapter implements DraftInventoryReposito
             try (ResultSet row = statement.executeQuery()) {
                 if (!row.next()) throw new SQLException("Unable to lock Rule Set before creating its draft");
             }
+        }
+        try(PreparedStatement q=connection.prepareStatement("SELECT COUNT(*) FROM ruleset_version WHERE ruleset_id=? AND status='DRAFT'")) {
+            q.setLong(1,rulesetId);try(ResultSet r=q.executeQuery()){r.next();if(r.getLong(1)>0)throw new IllegalStateException("This Rule Set already has a DRAFT version; open it before importing another version");}
         }
         int versionNumber;
         try (PreparedStatement statement = connection.prepareStatement(

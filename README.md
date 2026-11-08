@@ -1,5 +1,7 @@
 # Privonym
 
+Lot 3 — référentiel et reproductibilité : [LOT3_REFERENTIEL.md](LOT3_REFERENTIEL.md).
+
 Lot 2 : reprise, annulation et récupération : [LOT2_EXECUTION.md](LOT2_EXECUTION.md).
 
 Corrections de confidentialité et d'accès du 8 novembre 2026 :

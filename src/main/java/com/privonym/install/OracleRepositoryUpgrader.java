@@ -89,7 +89,7 @@ public final class OracleRepositoryUpgrader {
                 if (firstMissing != null) throw new IllegalStateException(
                         "Incomplete migration history: " + firstMissing + " is missing before " + name
                         + ". Reconcile the installed schema with a verified baseline before upgrading.");
-                if (!recorded.equalsIgnoreCase(sha256(migration))) throw new IllegalStateException(
+                if (!matchesChecksum(migration,recorded)) throw new IllegalStateException(
                         "Migration checksum mismatch: " + name);
             }
         }
@@ -100,11 +100,11 @@ public final class OracleRepositoryUpgrader {
             String checksum = sha256(migration);
             String recordedChecksum = recordedChecksum(connection, name);
             if (recordedChecksum != null) {
-                if (!recordedChecksum.equalsIgnoreCase(checksum)) {
+                if (!matchesChecksum(migration,recordedChecksum)) {
                     throw new IllegalStateException("Migration " + name
                             + " was already recorded with a different SHA-256 checksum");
                 }
-                System.out.println("[SKIP] " + name + " already applied");
+                System.out.println(OracleRepositoryReconciler.adoptedChecksum(connection,name)!=null?"[BASELINE] "+name+" observed runtime state adopted; historical script not replayed":"[SKIP] "+name+" already applied");
                 skipped++;
                 continue;
             }
@@ -155,17 +155,18 @@ public final class OracleRepositoryUpgrader {
         }
     }
 
-    private static String recordedChecksum(Connection connection, String name) throws SQLException {
+    static String recordedChecksum(Connection connection, String name) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT checksum_sha256 FROM " + HISTORY_TABLE + " WHERE migration_name=?")) {
             statement.setString(1, name);
             try (ResultSet row = statement.executeQuery()) {
-                return row.next() ? row.getString(1) : null;
+                if(row.next())return row.getString(1);
             }
         }
+        return OracleRepositoryReconciler.adoptedChecksum(connection,name);
     }
 
-    private static void apply(Connection connection, Path migration) throws IOException, SQLException {
+    static void apply(Connection connection, Path migration) throws IOException, SQLException {
         String script = Files.readString(migration, StandardCharsets.UTF_8);
         for (String sql : OracleRepositoryInstaller.statements(script)) {
             if (sql.equalsIgnoreCase("COMMIT")) {
@@ -207,7 +208,17 @@ public final class OracleRepositoryUpgrader {
         }
     }
 
-    private static String sha256(Path path) throws IOException, NoSuchAlgorithmException {
+    static boolean matchesChecksum(Path path,String recorded)throws IOException,NoSuchAlgorithmException {
+        if(recorded.equalsIgnoreCase(sha256(path)))return true;
+        String lf=Files.readString(path,StandardCharsets.UTF_8).replace("\r\n","\n");
+        for(String text:List.of(lf,lf.replace("\n","\r\n"))) {
+            String digest=HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(text.getBytes(StandardCharsets.UTF_8)));
+            if(recorded.equalsIgnoreCase(digest))return true;
+        }
+        return false;
+    }
+
+    static String sha256(Path path) throws IOException, NoSuchAlgorithmException {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         return HexFormat.of().formatHex(digest.digest(Files.readAllBytes(path)));
     }

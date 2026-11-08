@@ -32,6 +32,7 @@ public final class OracleMigrationScriptSmokeCheck {
         if (migrations.isEmpty()) {
             throw new IllegalStateException("No Oracle migration found in " + directory);
         }
+        RepositoryBaselineSmokeCheck.verify();
         verifyPlSqlBlockParsing();
         verifyMixedOracleScriptParsing();
         verifyMultilineUpdateAndMergeParsing();

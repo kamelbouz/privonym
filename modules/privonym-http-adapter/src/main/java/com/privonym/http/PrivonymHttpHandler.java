@@ -2301,13 +2301,11 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
         if(applicationSecurity==null)return -1L;
         PrivonymUser actor=sessionUser(request);
         if(actor==null){forbidden(response,callback,"Privonym login required");return null;}
-        var existing=rulesets.listRulesets().stream().filter(r->r.dataSourceId()==dataSourceId).toList();
-        if(existing.size()>1)throw new IllegalStateException("Several Rule Sets exist for this connection; reconcile them before importing");
-        if(existing.isEmpty()) {
+        long rulesetId=rulesets.currentRulesetId(dataSourceId);
+        if(rulesetId==0) {
             if(!requirePrivilege(actor,ApplicationSecurity.RULESET_CREATE,response,callback))return null;
             return 0L;
         }
-        long rulesetId=existing.get(0).id();
         if(!requirePrivilege(actor,ApplicationSecurity.RULESET_MODIFY_OWN,response,callback))return null;
         if(!actor.administrator()&&!applicationSecurity.ownsRuleset(actor.id(),rulesetId)) {
             forbidden(response,callback,"This Rule Set belongs to another Privonym user");return null;

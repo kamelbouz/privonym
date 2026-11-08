@@ -1,5 +1,7 @@
 # Compilation, tests et scripts
 
+Lot 3 — référentiel et reproductibilité : [LOT3_REFERENTIEL.md](LOT3_REFERENTIEL.md).
+
 ## Prérequis
 
 - Windows et Windows PowerShell 5.1 ou PowerShell 7 pour le build fourni.

@@ -36,13 +36,23 @@ public final class OracleDraftInventoryAdapter implements DraftInventoryReposito
     public DraftInventoryResult create(long dataSourceId, String inventoryCode,
             String inventoryName, String sourceSql, SqlInventoryPreview preview,
             String createdBy) {
+        return createInternal(dataSourceId,inventoryCode,inventoryName,sourceSql,preview,createdBy,-1,0);
+    }
+
+    @Override public DraftInventoryResult createAuthorized(long dataSourceId,String inventoryCode,
+            String inventoryName,String sourceSql,SqlInventoryPreview preview,String createdBy,long expectedRulesetId,long expectedOwnerUserId) {
+        if(expectedRulesetId<0||expectedOwnerUserId<0)throw new IllegalArgumentException("Expected Rule Set and owner must be explicit");
+        return createInternal(dataSourceId,inventoryCode,inventoryName,sourceSql,preview,createdBy,expectedRulesetId,expectedOwnerUserId);
+    }
+    private DraftInventoryResult createInternal(long dataSourceId,String inventoryCode,
+            String inventoryName,String sourceSql,SqlInventoryPreview preview,String createdBy,long expectedRulesetId,long expectedOwnerUserId) {
         String reference = "TRANSFORM-" + UUID.randomUUID().toString().replace("-", "")
                 .substring(0, 18).toUpperCase(Locale.ROOT);
         try (Connection connection = open()) {
             try {
                 Source source = loadSource(connection, dataSourceId);
                 Ruleset ruleset = ensureRuleset(connection, dataSourceId,
-                        inventoryCode, inventoryName, createdBy);
+                        inventoryCode, inventoryName, createdBy,expectedRulesetId,expectedOwnerUserId);
                 Version version = createVersion(connection, ruleset.id(), createdBy);
                 long importId = insertImport(connection, dataSourceId, version.id(), reference,
                         sourceSql, preview, createdBy);
@@ -87,7 +97,7 @@ public final class OracleDraftInventoryAdapter implements DraftInventoryReposito
     }
 
     private static Ruleset ensureRuleset(Connection connection, long dataSourceId,
-            String code, String name, String owner)
+            String code, String name, String owner,long expectedRulesetId,long expectedOwnerUserId)
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT data_source_id FROM data_source WHERE data_source_id = ? FOR UPDATE")) {
@@ -101,13 +111,28 @@ public final class OracleDraftInventoryAdapter implements DraftInventoryReposito
         try (PreparedStatement statement = connection.prepareStatement("""
                 SELECT ruleset_id, code FROM ruleset
                  WHERE data_source_id = ?
-                 ORDER BY ruleset_id FETCH FIRST 1 ROW ONLY
+                 ORDER BY ruleset_id FETCH FIRST 2 ROWS ONLY
                 """)) {
             statement.setLong(1, dataSourceId);
             try (ResultSet row = statement.executeQuery()) {
-                if (row.next()) return new Ruleset(row.getLong(1), row.getString(2));
+                if (row.next()) {
+                    long id=row.getLong(1);String existingCode=row.getString(2);
+                    if(row.next())throw new IllegalStateException("Several Rule Sets exist for this connection; reconcile them before importing");
+                    requireExpectedRuleset(expectedRulesetId,id);
+                    if(expectedRulesetId>=0) {
+                        try(PreparedStatement ownership=connection.prepareStatement("SELECT owner_user_id FROM ruleset WHERE ruleset_id=? FOR UPDATE")) {
+                            ownership.setLong(1,id);
+                            try(ResultSet current=ownership.executeQuery()) {
+                                if(!current.next())throw new IllegalStateException("Rule Set changed after authorization");
+                                requireExpectedOwner(expectedOwnerUserId,current.getLong(1));
+                            }
+                        }
+                    }
+                    return new Ruleset(id,existingCode);
+                }
             }
         }
+        requireExpectedRuleset(expectedRulesetId,0);
         String normalizedName = name == null ? "" : name.trim();
         if (normalizedName.isEmpty() || normalizedName.length() > 200) {
             throw new IllegalArgumentException(
@@ -154,6 +179,13 @@ public final class OracleDraftInventoryAdapter implements DraftInventoryReposito
         int maxBaseLength = 100 - suffix.length();
         if (base.length() > maxBaseLength) base = base.substring(0, maxBaseLength);
         return base + suffix;
+    }
+
+    static void requireExpectedRuleset(long expected,long actual) {
+        if(expected>=0&&expected!=actual)throw new IllegalStateException("Connection Rule Set changed after authorization; analyze again");
+    }
+    static void requireExpectedOwner(long expected,long actual) {
+        if(expected>0&&expected!=actual)throw new IllegalStateException("Rule Set owner changed after authorization; import rejected");
     }
 
     private static Version createVersion(Connection connection, long rulesetId, String createdBy)

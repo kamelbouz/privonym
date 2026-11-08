@@ -71,8 +71,8 @@ public final class ExecutionReportPdfWriter {
             lines.add("Recorded processed rows: " + report.rowsProcessed());
             lines.add("Checkpoint progress is not a completed data validation.");
         } else {
-            lines.add("TABLE VALIDATION");
-            lines.add("Table | Expected | Anonymized | Difference | Status");
+            lines.add("EXECUTION COUNTERS - REPOSITORY EVIDENCE");
+            lines.add("Table | Expected affected | Reported processed | Difference | Status");
             report.metrics().stream().filter(metric -> metric.name().startsWith("EXPECTED_"))
                     .sorted(Comparator.comparing(ValidationMetric::name)).forEach(expected -> {
                         String key = expected.name().substring("EXPECTED_".length());
@@ -84,7 +84,22 @@ public final class ExecutionReportPdfWriter {
             lines.add("");
             lines.add("TOTALS");
             lines.add("Expected rows: " + metric(report, "ROWS_EXPECTED_TOTAL"));
-            lines.add("Anonymized rows: " + metric(report, "ROWS_ANONYMIZED_TOTAL"));
+            lines.add("Reported processed rows: " + metric(report, "ROWS_ANONYMIZED_TOTAL"));
+            lines.add("");
+            lines.add("INDEPENDENT TARGET POPULATION COUNTS");
+            var targetMetrics=report.metrics().stream().filter(m->m.name().startsWith("TARGET_ACTUAL_")).toList();
+            if(targetMetrics.isEmpty())lines.add("NOT CHECKED: target-count evidence unavailable for this report.");
+            for(ValidationMetric actual:targetMetrics) {
+                String key=actual.name().substring("TARGET_ACTUAL_".length());
+                if(metric(report,"TARGET_CHECKED_"+key)==0)lines.add(key+" | Actual="+actual.value()+" | NOT CHECKED: pre-execution baseline missing");
+                else {
+                    long expected=metric(report,"TARGET_EXPECT_"+key);
+                    lines.add(key+" | Expected="+expected+" | Actual="+actual.value()+" | "+(expected==actual.value()?"PASSED":"FAILED"));
+                }
+            }
+            lines.add("");
+            lines.add("SENSITIVE-DATA REMOVAL: NOT ASSESSED");
+            lines.add("Execution counters, population and FK checks do not prove anonymization.");
         }
         lines.add("");
         lines.add("This report was generated automatically after the execution attempt.");
@@ -106,6 +121,16 @@ public final class ExecutionReportPdfWriter {
     }
 
     private static byte[] simplePdf(List<String> lines) throws IOException {
+        List<String> wrapped=new ArrayList<>();
+        for(String original:lines) {
+            String rest=original;
+            while(rest.length()>68) {
+                int split=rest.lastIndexOf(' ',68);if(split<1)split=68;
+                wrapped.add(rest.substring(0,split));rest="  "+rest.substring(split).stripLeading();
+            }
+            wrapped.add(rest);
+        }
+        lines=wrapped;
         List<String> pageStreams = new ArrayList<>();
         for (int offset = 0; offset < lines.size(); offset += 38) {
             List<String> page = lines.subList(offset, Math.min(offset + 38, lines.size()));

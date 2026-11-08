@@ -1238,13 +1238,16 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             Response response, Callback callback) {
         try {
             long dataSourceId = Long.parseLong(dataSourceText);
+            Long expectedRulesetId=authorizeDraftImport(dataSourceId,request,response,callback);
+            if(expectedRulesetId==null)return;
             String code = queryParameter(request, "code");
             String name = queryParameter(request, "name");
             String sql = readBody(request);
             DataSourceInventory selectedInventory = inventory.getInventory(dataSourceId);
-            DraftInventoryResult created = draftInventory.create(dataSourceId,
-                    selectedInventory.technology(), code, name, sql);
-            assignVersionOwner(request, created.rulesetVersionId());
+            DraftInventoryResult created = expectedRulesetId<0?draftInventory.create(dataSourceId,
+                    selectedInventory.technology(),code,name,sql):draftInventory.createAuthorized(dataSourceId,
+                    selectedInventory.technology(),code,name,sql,expectedRulesetId,importOwnerExpectation(request));
+            if(expectedRulesetId==0)assignVersionOwner(request,created.rulesetVersionId());
             writeJson(response, callback, 201, draftInventoryJson(created));
         } catch (NumberFormatException error) {
             writeJson(response, callback, 400,
@@ -1264,6 +1267,8 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             Response response, Callback callback) {
         try {
             long dataSourceId = Long.parseLong(dataSourceText);
+            Long expectedRulesetId=authorizeDraftImport(dataSourceId,request,response,callback);
+            if(expectedRulesetId==null)return;
             String csv = readBody(request);
             String code = LegacyInventoryCsv.rulesetName(csv);
             SqlInventoryPreview preview = LegacyInventoryCsv.parse(csv);
@@ -1271,9 +1276,10 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             // scanned yet, or whose target schema has changed since the last scan.
             // Refresh the catalog before resolving imported table and column names.
             discovery.scan(dataSourceId);
-            DraftInventoryResult created = draftInventory.createFromInventory(
-                    dataSourceId, code, code, csv, preview);
-            assignVersionOwner(request, created.rulesetVersionId());
+            DraftInventoryResult created = expectedRulesetId<0?draftInventory.createFromInventory(
+                    dataSourceId,code,code,csv,preview):draftInventory.createFromInventoryAuthorized(
+                    dataSourceId,code,code,csv,preview,expectedRulesetId,importOwnerExpectation(request));
+            if(expectedRulesetId==0)assignVersionOwner(request,created.rulesetVersionId());
             writeJson(response, callback, 201, draftInventoryJson(created));
         } catch (NumberFormatException error) {
             writeJson(response, callback, 400,
@@ -2168,8 +2174,8 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             }
             PrivonymUser updated = applicationSecurity.updateUserPrivileges(actor.username(), userId,
                     administrator, privileges);
-            userSessions.entrySet().removeIf(entry -> entry.getValue().user().id() == userId
-                    && entry.getValue().user().id() != actor.id());
+            userSessions.entrySet().removeIf(entry -> entry.getValue().user().id() == userId);
+            if(userId==actor.id())response.getHeaders().put("Set-Cookie",expiredSessionCookie());
             writeJson(response, callback, 200, userJson(updated));
         } catch (IOException error) {
             serviceUnavailable(response, callback, new IllegalStateException("Unable to read privileges", error));
@@ -2214,10 +2220,11 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             catch(NumberFormatException invalid){forbidden(response,callback,"Invalid Rule Set");return false;}
         }
         else if (path.startsWith(DISCOVERY_API_PATH + "/connections")) privilege = ApplicationSecurity.CONNECTION_MANAGE;
+        else if(path.startsWith(INVENTORY_CSV_PATH+"/imports/")||path.startsWith(TRANSFORMER_DRAFT_PATH))
+            privilege=user.has(ApplicationSecurity.RULESET_CREATE)?ApplicationSecurity.RULESET_CREATE:ApplicationSecurity.RULESET_MODIFY_OWN;
         else if (path.startsWith(DISCOVERY_API_PATH + "/rulesets/")
                 || path.startsWith(DISCOVERY_API_PATH + "/empty-rulesets/")
-                || path.startsWith(INVENTORY_CSV_PATH + "/imports/")
-                || path.startsWith(TRANSFORMER_DRAFT_PATH)) privilege = ApplicationSecurity.RULESET_CREATE;
+                ) privilege = ApplicationSecurity.RULESET_CREATE;
         else if (path.startsWith(ENVIRONMENTS_PATH)) privilege = ApplicationSecurity.ENVIRONMENT_MANAGE;
         else if (path.startsWith(MASKING_INVENTORIES_PATH + "/") && path.endsWith("/publish")) {
             String value = path.substring((MASKING_INVENTORIES_PATH + "/").length(),
@@ -2257,6 +2264,29 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
         if (user.has(privilege)) return true;
         forbidden(response, callback, "Missing privilege: " + privilege);
         return false;
+    }
+
+    private long importOwnerExpectation(Request request) {
+        PrivonymUser actor=sessionUser(request);
+        if(actor==null)throw new IllegalStateException("Session changed during import authorization");
+        return actor.administrator()?0:actor.id();
+    }
+    private Long authorizeDraftImport(long dataSourceId,Request request,Response response,Callback callback) {
+        if(applicationSecurity==null)return -1L;
+        PrivonymUser actor=sessionUser(request);
+        if(actor==null){forbidden(response,callback,"Privonym login required");return null;}
+        var existing=rulesets.listRulesets().stream().filter(r->r.dataSourceId()==dataSourceId).toList();
+        if(existing.size()>1)throw new IllegalStateException("Several Rule Sets exist for this connection; reconcile them before importing");
+        if(existing.isEmpty()) {
+            if(!requirePrivilege(actor,ApplicationSecurity.RULESET_CREATE,response,callback))return null;
+            return 0L;
+        }
+        long rulesetId=existing.get(0).id();
+        if(!requirePrivilege(actor,ApplicationSecurity.RULESET_MODIFY_OWN,response,callback))return null;
+        if(!actor.administrator()&&!applicationSecurity.ownsRuleset(actor.id(),rulesetId)) {
+            forbidden(response,callback,"This Rule Set belongs to another Privonym user");return null;
+        }
+        return rulesetId;
     }
 
     private void assignOwner(Request request, long rulesetId) {

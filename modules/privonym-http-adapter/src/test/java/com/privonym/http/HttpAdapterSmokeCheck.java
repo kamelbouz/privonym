@@ -170,6 +170,14 @@ public final class HttpAdapterSmokeCheck {
                     String name, String source, SqlInventoryPreview preview) {
                 return result(code);
             }
+            @Override public DraftInventoryResult createAuthorized(long ds,String technology,String code,String name,String sql,long expected,long owner) {
+                require(expected==(ds==9?61:0),"HTTP must pass the server-authorized Rule Set to the writer");
+                require(owner==(expected==61?3:5),"HTTP must pass the authorized owner for transactional recheck");
+                return expected==0?new DraftInventoryResult(71,"NEW-IMPORT",181,code,1,"DRAFT_CREATED",1,0,0,"checksum"):result(code);
+            }
+            @Override public DraftInventoryResult createFromInventoryAuthorized(long ds,String code,String name,String source,SqlInventoryPreview preview,long expected,long owner) {
+                return createAuthorized(ds,"ORACLE",code,name,source,expected,owner);
+            }
         };
         RulesetSummary rulesetSummary = new RulesetSummary(61, "CUSTOMER_MASKING",
                 "Customer masking", "Customer privacy policy", 9, "Oracle source",
@@ -766,10 +774,13 @@ public final class HttpAdapterSmokeCheck {
 
         PrivonymUser administrator = new PrivonymUser(1, "ADMIN", "Privonym Admin",
                 true, true, ApplicationSecurity.AVAILABLE_PRIVILEGES);
+        java.util.concurrent.atomic.AtomicInteger initialOwnerAssignments=new java.util.concurrent.atomic.AtomicInteger();
         ApplicationSecurity security = new ApplicationSecurity() {
             @Override public boolean isInitialized() { return true; }
             @Override public PrivonymUser createInitialAdministrator(String username,String displayName,char[] password) { return administrator; }
             @Override public PrivonymUser authenticate(String username,char[] password) {
+                if(username.equals("CREATOR")&&"Valid-password1!".equals(new String(password)))
+                    return new PrivonymUser(5,username,username,false,true,Set.of(ApplicationSecurity.RULESET_CREATE));
                 if(List.of("EDITOR","OTHER").contains(username)&&"Valid-password1!".equals(new String(password)))
                     return new PrivonymUser(username.equals("EDITOR")?3:4,username,username,false,true,Set.of(ApplicationSecurity.RULESET_MODIFY_OWN));
                 if ("MANAGER".equals(username) && "Valid-password1!".equals(new String(password)))
@@ -782,10 +793,13 @@ public final class HttpAdapterSmokeCheck {
             @Override public PrivonymUser createUser(String actor,String username,String displayName,char[] password,boolean admin,Set<String> privileges) { return new PrivonymUser(2,username,displayName,admin,true,privileges); }
             @Override public PrivonymUser updateUserPrivileges(String actor,long userId,boolean admin,Set<String> privileges) { return new PrivonymUser(userId,"USER","User",admin,true,privileges); }
             @Override public void setUserEnabled(String actor,long userId,boolean enabled) { }
-            @Override public boolean ownsRuleset(long userId,long rulesetId) { return userId!=4&&(userId!=3||rulesetId==61); }
+            @Override public boolean ownsRuleset(long userId,long rulesetId) { return userId!=4&&userId!=5&&(userId!=3||rulesetId==61); }
             @Override public boolean ownsRulesetVersion(long userId,long versionId) { return true; }
             @Override public void assignRulesetOwner(long rulesetId,long userId) { }
-            @Override public void assignRulesetVersionOwner(long versionId,long userId) { throw new AssertionError("Discovery draft must preserve existing Rule Set owner"); }
+            @Override public void assignRulesetVersionOwner(long versionId,long userId) {
+                require(versionId==181&&userId==5,"existing Rule Set owner must never be reassigned by import");
+                initialOwnerAssignments.incrementAndGet();
+            }
             @Override public void record(String username,String action,String type,String reference,String outcome) { }
             @Override public void close() { }
         };
@@ -844,6 +858,33 @@ public final class HttpAdapterSmokeCheck {
                 require(securedClient.send(draftRequest,HttpResponse.BodyHandlers.ofString()).statusCode()==(account.equals("EDITOR")?201:403),
                         "Discovery version creation must enforce Rule Set ownership and MODIFY_OWN");
             }
+            for(String account:List.of("EDITOR","OTHER","CREATOR")) {
+                var login=sendForm(securedClient,securedPort,"/api/v1/security/login","username="+account+"&password=Valid-password1%21","");
+                String importCookie=login.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
+                for(String route:List.of("/api/v1/transformations/drafts/9?code=CUSTOMER_MASKING&name=Customer","/api/v1/inventory-csv/imports/9")) {
+                    String body=route.contains("inventory-csv")?"RULESET_NAME,TABLE_OWNER,TABLE_NAME,COLUMN_NAME,DATA_TYPE,ALGORITHM,IS_MASKED,CRITERIA\r\nCUSTOMER_MASKING,APP,CUSTOMER,EMAIL,VARCHAR2,NULLIFY,Y,ALL\r\n":"UPDATE APP.CUSTOMER SET EMAIL=NULL";
+                    var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+securedPort+route)).header("Cookie",importCookie)
+                            .POST(HttpRequest.BodyPublishers.ofString(body)).build();
+                    int status=securedClient.send(request,HttpResponse.BodyHandlers.ofString()).statusCode();
+                    require(status==(account.equals("EDITOR")?201:403),"import must enforce MODIFY_OWN and preserve existing ownership: "+account+" status="+status);
+                }
+                if(account.equals("CREATOR")) {
+                    var request=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+securedPort+"/api/v1/transformations/drafts/88?code=NEW_RULESET&name=New"))
+                            .header("Cookie",importCookie).POST(HttpRequest.BodyPublishers.ofString("UPDATE APP.CUSTOMER SET EMAIL=NULL")).build();
+                    require(securedClient.send(request,HttpResponse.BodyHandlers.ofString()).statusCode()==201,"CREATE must still permit an initial Rule Set");
+                }
+            }
+            require(initialOwnerAssignments.get()==1,"only the initial import may assign a Rule Set owner");
+            var secondAdmin=sendForm(securedClient,securedPort,"/api/v1/security/login","username=ADMIN&password=Valid-password1%21","");
+            String secondCookie=secondAdmin.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];
+            var demote=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+securedPort+"/api/v1/security/users/1/privileges"))
+                    .header("Cookie",cookie).header("Content-Type","application/x-www-form-urlencoded")
+                    .PUT(HttpRequest.BodyPublishers.ofString("administrator=false&privileges=")).build();
+            var demoted=securedClient.send(demote,HttpResponse.BodyHandlers.ofString());
+            require(demoted.statusCode()==200&&demoted.headers().firstValue("Set-Cookie").orElse("").contains("Max-Age=0"),"self privilege change must expire the actor cookie");
+            for(String revoked:List.of(cookie,secondCookie))
+                require(sendForm(securedClient,securedPort,"/api/v1/security/me","",revoked).statusCode()==401,
+                        "all sessions including actor and second session must be revoked immediately");
         } finally {
             securedServer.stop();
         }

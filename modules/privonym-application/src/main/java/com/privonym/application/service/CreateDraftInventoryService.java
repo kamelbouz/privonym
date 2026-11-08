@@ -34,6 +34,20 @@ public final class CreateDraftInventoryService implements CreateDraftInventoryUs
     @Override
     public DraftInventoryResult createFromInventory(long dataSourceId, String inventoryCode,
             String inventoryName, String source, SqlInventoryPreview preview) {
+        return createInternal(dataSourceId,inventoryCode,inventoryName,source,preview,-1,0);
+    }
+
+    @Override public DraftInventoryResult createAuthorized(long dataSourceId,String technology,
+            String code,String name,String sql,long expectedRulesetId,long expectedOwnerUserId) {
+        return createFromInventoryAuthorized(dataSourceId,code,name,sql,previewer.preview(technology,sql),expectedRulesetId,expectedOwnerUserId);
+    }
+    @Override public DraftInventoryResult createFromInventoryAuthorized(long dataSourceId,String code,
+            String name,String source,SqlInventoryPreview preview,long expectedRulesetId,long expectedOwnerUserId) {
+        if(expectedRulesetId<0||expectedOwnerUserId<0)throw new IllegalArgumentException("Expected Rule Set and owner must be explicit");
+        return createInternal(dataSourceId,code,name,source,preview,expectedRulesetId,expectedOwnerUserId);
+    }
+    private DraftInventoryResult createInternal(long dataSourceId,String inventoryCode,
+            String inventoryName,String source,SqlInventoryPreview preview,long expectedRulesetId,long expectedOwnerUserId) {
         if (dataSourceId <= 0) throw new IllegalArgumentException("A valid data source is required");
         String code = inventoryCode == null ? ""
                 : inventoryCode.trim().toUpperCase(Locale.ROOT);
@@ -41,6 +55,7 @@ public final class CreateDraftInventoryService implements CreateDraftInventoryUs
         if (preview.tables().isEmpty()) {
             throw new IllegalArgumentException("No masking operation is available for the draft inventory");
         }
-        return repository.create(dataSourceId, code, name, source, preview, createdBy);
+        return expectedRulesetId<0?repository.create(dataSourceId,code,name,source,preview,createdBy)
+                :repository.createAuthorized(dataSourceId,code,name,source,preview,createdBy,expectedRulesetId,expectedOwnerUserId);
     }
 }

@@ -238,6 +238,8 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                         : expectedRows(target, step.generatedCode(), operation);
                 Map<Integer, SuccessfulChunk> completed = successfulChunks(repository,
                         step.jobStepId());
+                TargetRowCountEvidence.capture(repository,target,step.jobStepId(),operation.table(),operation.type(),
+                        expected,findTopLevelWhere(step.generatedCode(),operation.targetEnd())>=0,!completed.isEmpty());
                 saveMetric(repository, step.jobStepId(), "ROWS_EXPECTED", expected, "ROWS");
                 long chunks = chunked ? Math.max(1L, (expected + chunkSize - 1L) / chunkSize) : 1L;
                 saveMetric(repository, step.jobStepId(), "CHUNKS_TOTAL", chunks, "CHUNKS");

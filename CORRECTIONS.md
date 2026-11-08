@@ -1,5 +1,17 @@
 # Corrections du 24 octobre 2026
 
+## Lot 1 du 8 novembre 2026
+
+Les imports authentifiés contrôlent la propriété du Rule Set existant et ne la
+réattribuent plus. Le contrôle de liaison/propriété est répété sous verrou avant
+l'écriture. Les changements de privilèges révoquent toutes les sessions concernées,
+y compris celle de l'acteur. La validation ajoute des comptages indépendants sur
+la cible et les PDF distinguent les compteurs du retrait des données sensibles,
+qui reste non évalué. L'activation de la fonction email SQL Server corrigée est
+séparée de celle des JAR : [LOT1_CONFIDENTIALITE.md](LOT1_CONFIDENTIALITE.md).
+
+## Historique des corrections initiales
+
 Cette livraison complète la base 2.5.0 avec les changements suivants :
 
 - Filtres des règles conservés dans les plans de jobs, y compris les critères

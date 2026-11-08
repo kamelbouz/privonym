@@ -39,21 +39,67 @@ public final class OracleTargetDataValidator implements TargetDataValidator {
             String key = metricKey(table.schema(), table.table());
             metrics.add(new ValidationMetric("EXPECTED_" + key, table.expected()));
             metrics.add(new ValidationMetric("ANONYMIZED_" + key, table.anonymized()));
+            metrics.add(new ValidationMetric("PROCESSED_"+key,table.anonymized()));
             long difference = Math.abs(table.anonymized() - table.expected());
             metrics.add(new ValidationMetric("DIFFERENCE_" + key, difference));
             String status = difference == 0 ? "PASSED" : "FAILED";
-            messages.add(table.schema() + "." + table.table() + ": expected=" + table.expected()
-                    + ", anonymized=" + table.anonymized() + ", difference="
+            messages.add("Execution counters " + table.schema() + "." + table.table() + ": expected=" + table.expected()
+                    + ", reported processed=" + table.anonymized() + ", difference="
                     + (table.anonymized() - table.expected()) + ", status=" + status);
             if (difference != 0) mismatches.add(table.schema() + "." + table.table());
         }
         metrics.add(new ValidationMetric("ROWS_EXPECTED_TOTAL", expectedTotal));
         metrics.add(new ValidationMetric("ROWS_ANONYMIZED_TOTAL", anonymizedTotal));
+        metrics.add(new ValidationMetric("ROWS_PROCESSED_TOTAL",anonymizedTotal));
         if (!mismatches.isEmpty()) throw new IllegalStateException(
                 "Row-count validation failed for table(s): " + String.join(", ", mismatches));
-        messages.add("Per-table row-count validation passed for " + tables.size() + " table(s)");
+        messages.add("Execution counter consistency passed for " + tables.size() + " table(s)");
+        validateTargetPopulations(dataSourceId,jobId,tables,messages,metrics);
         validateReferentialIntegrity(dataSourceId, messages, metrics);
+        messages.add("PRIVACY_NOT_ASSESSED: Population and relationship checks do not prove removal of sensitive data. No content detector was run.");
+        metrics.add(new ValidationMetric("PRIVACY_ASSESSED",0));
         return new ValidationOutcome(messages, metrics);
+    }
+
+    private void validateTargetPopulations(DataSourceId source,JobId jobId,List<TableResult> tables,
+            List<String> messages,List<ValidationMetric> metrics) {
+        Map<String,Long> expected=new LinkedHashMap<>();
+        String sql="""
+                SELECT cs.schema_name,ct.table_name,m.metric_value FROM job_step s
+                JOIN catalog_table ct ON ct.catalog_table_id=s.catalog_table_id
+                JOIN catalog_schema cs ON cs.catalog_schema_id=ct.catalog_schema_id
+                JOIN job_metric m ON m.job_step_id=s.job_step_id AND m.metric_name='TARGET_ROWS_EXPECTED'
+                WHERE s.job_id=? AND cs.data_source_id=? AND s.step_type='ANONYMIZE_TABLE' AND s.status='SUCCEEDED'
+                ORDER BY s.step_number
+                """;
+        try(PreparedStatement query=repository.prepareStatement(sql)) {
+            query.setLong(1,jobId.value());query.setLong(2,source.value());
+            try(ResultSet row=query.executeQuery()) {
+                while(row.next())expected.put(row.getString(1)+"\0"+row.getString(2),row.getLong(3));
+            }
+            String technology=technology(source);
+            for(TableResult table:tables) {
+                long actual;
+                try(PreparedStatement count=target.prepareStatement("SELECT "+(technology.equals("SQLSERVER")?"COUNT_BIG(*)":"COUNT(*)")+" FROM "+qualified(technology,table.schema(),table.table()));
+                        ResultSet row=count.executeQuery()) {
+                    if(!row.next())throw new SQLException("Missing target population result");actual=row.getLong(1);
+                }
+                String key=metricKey(table.schema(),table.table());
+                metrics.add(new ValidationMetric("TARGET_ACTUAL_"+key,actual));
+                Long before=expected.get(table.schema()+"\0"+table.table());
+                metrics.add(new ValidationMetric("TARGET_CHECKED_"+key,before==null?0:1));
+                if(before==null) {
+                    messages.add("TARGET_COUNT_NOT_CHECKED: "+table.schema()+"."+table.table()+" actual rows="+actual
+                            +"; no pre-execution baseline exists for this historical/partial execution.");
+                    continue;
+                }
+                metrics.add(new ValidationMetric("TARGET_EXPECT_"+key,before));
+                metrics.add(new ValidationMetric("TARGET_DIFF_"+key,Math.abs(actual-before)));
+                if(actual!=before)throw new IllegalStateException("Independent target row-count validation failed for "
+                        +table.schema()+"."+table.table()+": expected="+before+", actual="+actual);
+                messages.add("Target population "+table.schema()+"."+table.table()+": expected="+before+", actual="+actual+", status=PASSED");
+            }
+        }catch(SQLException error){throw failure("independently count target rows",error);}
     }
 
     private void validateReferentialIntegrity(DataSourceId source,List<String> messages,

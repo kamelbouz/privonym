@@ -55,6 +55,8 @@ public final class OracleMeasuredPlanExecutor implements TargetPlanExecutor {
                 validate(step);
                 Operation operation = operation(step.generatedCode());
                 long expected = expectedRows(step.generatedCode(), operation);
+                TargetRowCountEvidence.capture(repository,target,step.jobStepId(),operation.table(),operation.type(),
+                        expected,findTopLevelWhere(step.generatedCode(),operation.targetEnd())>=0,false);
                 saveExpectedRows(step.jobStepId(), expected);
                 try (PreparedStatement statement = target.prepareStatement(step.generatedCode())) {
                     int affected = statement.executeUpdate();

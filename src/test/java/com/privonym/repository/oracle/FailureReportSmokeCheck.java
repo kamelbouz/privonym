@@ -51,9 +51,19 @@ final class FailureReportSmokeCheck {
                 "failed execution must not display absent or stale validation as current totals");
         String successful = new String(ExecutionReportPdfWriter.render(report, Instant.EPOCH),
                 StandardCharsets.ISO_8859_1);
-        require(successful.contains("TABLE VALIDATION") && successful.contains("Expected rows: 123")
-                && successful.contains("Anonymized rows: 123"),
-                "successful report must preserve its validation results");
+        require(successful.contains("EXECUTION COUNTERS") && successful.contains("Expected rows: 123")
+                && successful.contains("Reported processed rows: 123")&&!successful.contains("Anonymized rows:")
+                &&successful.contains("NOT CHECKED: target-count evidence unavailable")
+                &&successful.contains("SENSITIVE-DATA REMOVAL: NOT ASSESSED"),
+                "historical counters must not be presented as independent masking proof");
+        JobReport evidenced=new JobReport(new JobId(27),new JobReference("JOB_TEST"),123,1,List.of(
+                new ValidationMetric("EXPECTED_S_T",123),new ValidationMetric("ANONYMIZED_S_T",123),
+                new ValidationMetric("TARGET_ACTUAL_S_T",100),new ValidationMetric("TARGET_EXPECT_S_T",100),
+                new ValidationMetric("TARGET_CHECKED_S_T",1)));
+        String independentlyCounted=new String(ExecutionReportPdfWriter.render(evidenced,Instant.EPOCH),StandardCharsets.ISO_8859_1);
+        require(independentlyCounted.contains("Expected=100 | Actual=100 | PASSED")
+                &&independentlyCounted.contains("SENSITIVE-DATA REMOVAL: NOT ASSESSED"),
+                "independent population counts must remain separate from privacy assessment");
         System.out.println("Failure report and opt-in timeout smoke check passed.");
     }
 

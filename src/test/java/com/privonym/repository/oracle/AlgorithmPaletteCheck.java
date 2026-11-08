@@ -205,10 +205,12 @@ public final class AlgorithmPaletteCheck {
     }
 
     public static void main(String[] args) throws Exception {
-        if(args.length<2||args.length>3)throw new IllegalArgumentException("Expected properties, V2_024 path, optional --apply or --qualify-helper");
+        if(args.length<2||args.length>3)throw new IllegalArgumentException("Expected properties, V2_024 path, optional --apply, --apply-helper-only or --qualify-helper");
         boolean apply=args.length==3&&args[2].equals("--apply");
+        boolean applyHelperOnly=args.length==3&&args[2].equals("--apply-helper-only");
+        boolean installHelper=apply||applyHelperOnly;
         boolean qualifyHelper=args.length==3&&args[2].equals("--qualify-helper");
-        if(args.length==3&&!apply&&!qualifyHelper)throw new IllegalArgumentException("Unknown option");
+        if(args.length==3&&!installHelper&&!qualifyHelper)throw new IllegalArgumentException("Unknown option");
         Path migration=Path.of(args[1]);
         verify(migration);
         var definitions=templates(migration);
@@ -235,7 +237,11 @@ public final class AlgorithmPaletteCheck {
                 definitions.get("TEXT_REDACT_COMMON").put(technology,compose(repository,technology));
             check(repository,"ORACLE",definitions);
             repository.rollback();
-            if(apply) requireIdle(repository);
+            if(installHelper) {
+                // Exclude a concurrent job start while qualifying/replacing the target helper.
+                try(Statement maintenance=repository.createStatement()){maintenance.execute("LOCK TABLE anonymization_job IN SHARE MODE NOWAIT");}
+                requireIdle(repository);
+            }
             try(Statement query=repository.createStatement();ResultSet rows=query.executeQuery("""
                     SELECT connector_id,technology_code,host_name,port,service_name,database_name,
                            username_value,encrypted_password FROM connector
@@ -250,7 +256,7 @@ public final class AlgorithmPaletteCheck {
                     try(Connection target=DriverManager.getConnection(details.jdbcUrl(),details.username(),new String(password))){
                         target.setAutoCommit(false);
                         if(technology.equals("POSTGRESQL"))target.setReadOnly(true);
-                        if(technology.equals("SQLSERVER")&&(apply||qualifyHelper)) {
+                        if(technology.equals("SQLSERVER")&&(installHelper||qualifyHelper)) {
                             Path helper=migration.toAbsolutePath().getParent().getParent()
                                     .resolve("target-functions/sqlserver/privonym_text_redact.sql");
                             String helperSql=Files.readString(helper);
@@ -278,7 +284,7 @@ public final class AlgorithmPaletteCheck {
                             }
                         }
                         check(target,technology,definitions);
-                        if(technology.equals("SQLSERVER")&&apply) {
+                        if(technology.equals("SQLSERVER")&&installHelper) {
                             target.commit();System.out.println("SQL Server text helper correction installed after qualification.");
                         }
                         target.rollback();checked.add(technology);
@@ -287,7 +293,7 @@ public final class AlgorithmPaletteCheck {
                 require(checked.containsAll(Set.of("POSTGRESQL","SQLSERVER")),"both portable targets must be tested");
             }
             repository.rollback();
-            if(!apply){System.out.println(qualifyHelper
+            if(!apply){System.out.println(applyHelperOnly?"Qualified SQL Server helper installed; no catalog or business data modified.":qualifyHelper
                     ? "Qualification completed; helper body evaluated without DDL; no catalog or business data modified."
                     : "SELECT-only qualification completed; no catalog or business data modified.");return;}
             install(repository,migration,block,config.getProperty("repository.user"),definitions);
@@ -339,7 +345,7 @@ public final class AlgorithmPaletteCheck {
 
     private static void requireIdle(Connection repository)throws SQLException {
         try(Statement query=repository.createStatement();ResultSet row=query.executeQuery(
-                "SELECT COUNT(*) FROM anonymization_job WHERE status IN('RUNNING','RETRYING','PAUSING','CANCELLING','VALIDATING')")) {
+                "SELECT COUNT(*) FROM anonymization_job WHERE status IN('PLANNING','PREFLIGHTING','RUNNING','RETRYING','PAUSING','CANCELLING','VALIDATING')")) {
             row.next();require(row.getInt(1)==0,"Active jobs exist; activation deferred.");
         }
     }

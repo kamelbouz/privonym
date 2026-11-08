@@ -482,11 +482,15 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
         try (PreparedStatement insert = connection.prepareStatement("""
                 INSERT INTO validation_result
                     (job_id, validation_type, status, message)
-                VALUES (?, 'ROW_COUNT', 'PASSED', ?)
+                VALUES (?, ?, ?, ?)
                 """)) {
             for (String message : outcome.messages()) {
                 insert.setLong(1, jobId.value());
-                insert.setString(2, message);
+                boolean privacy=message.startsWith("PRIVACY_NOT_ASSESSED:");
+                boolean missing=message.startsWith("TARGET_COUNT_NOT_CHECKED:");
+                insert.setString(2,privacy?"SENSITIVE_DATA_SCAN":message.startsWith("Foreign key ")?"REFERENTIAL_INTEGRITY":"ROW_COUNT");
+                insert.setString(3,privacy?"SKIPPED":missing?"WARNING":"PASSED");
+                insert.setString(4, message);
                 insert.addBatch();
             }
             insert.executeBatch();

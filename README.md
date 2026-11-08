@@ -1,5 +1,8 @@
 # Privonym
 
+Corrections de confidentialité et d'accès du 8 novembre 2026 :
+[LOT1_CONFIDENTIALITE.md](LOT1_CONFIDENTIALITE.md).
+
 Privonym est une application Java de masquage de données : découverte de colonnes
 sensibles, règles versionnées, génération SQL, contrôles préalables, exécution
 de jobs et rapports. Le référentiel est Oracle ; les adaptateurs cibles couvrent

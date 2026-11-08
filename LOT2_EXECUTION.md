@@ -41,3 +41,11 @@ Une erreur de contrôle conserve maintenant sa cause SQL, son code fournisseur e
 Tests : timeout isolé récupéré sans annulation SQL, timeouts répétés bloquants avec cause conservée, perte de connexion/propriétaire, fin du rollback/journal malgré un caller interrompu. ExecutionControlOracleIntegrationCheck qualifie le heartbeat et une contention réelle de la barrière de commit Oracle sur un job synthétique dédié, supprimé en fin de test, sans SQL métier.
 
 Les anciens messages génériques ne permettent pas de retrouver rétroactivement la cause précise d'un incident de contrôle. Les chunks déjà incertains restent soumis au parcours de récupération ; aucun RUNNING historique n'est automatiquement déclaré annulé ou réessayable par cette correction.
+
+## Régression du verrou de commit corrigée
+
+Le verrou partagé par les workers était acquis avec une attente JDBC limitée à cinq secondes. Si un autre worker gardait le verrou pendant un commit cible long, un worker sain était annulé avec ORA-01013. Cette régression a été reproduite sur Oracle réel avec deux connexions et un verrou maintenu 6,5 secondes.
+
+La barrière utilise maintenant FOR UPDATE NOWAIT et réessaie une contention ORA-00054 en vérifiant l'annulation entre essais. Le timeout réseau/requête ne sert plus de délai maximal d'attente d'un autre worker. Une fois le verrou obtenu, l'identité et le statut restent contrôlés avant chaque commit ; une perte de connexion et un changement de propriétaire ne sont pas ignorés.
+
+OracleChunkRoundTripIntegrationCheck qualifie le moteur réel sur une table synthétique dédiée : 18000 lignes, chunks de 1000, quatre workers, erreur injectée, rollback, reprise, conservation des checkpoints SUCCEEDED et vérification que chaque ligne a été modifiée exactement une fois. Le job et la table synthétiques sont supprimés en fin de test. Les tests contrôlent aussi l'annulation et le changement de propriétaire pendant l'attente du verrou. Les anciens chunks à issue inconnue ne sont pas réconciliés automatiquement.

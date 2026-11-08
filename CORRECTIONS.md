@@ -123,3 +123,5 @@ ou un compte administrateur. Les règles publiées et jobs restent inchangés.
 ## Surveillance d'exécution et journalisation
 
 Correction du timeout de contrôle isolé trop sévère, conservation de la cause SQL et arrêt des workers sans interrompre leur rollback/journal. Détails et limites dans [LOT2_EXECUTION.md](LOT2_EXECUTION.md).
+
+Le verrou de commit du lot 2 pouvait provoquer ORA-01013 après cinq secondes de contention normale. Correction par acquisition NOWAIT et attente contrôlée ; reproduction avant/après sur Oracle réel, puis panne/reprise vérifiée sur 18000 lignes en 18 chunks sans double traitement.

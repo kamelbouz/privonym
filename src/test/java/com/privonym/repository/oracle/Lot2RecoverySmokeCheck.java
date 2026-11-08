@@ -10,6 +10,8 @@ final class Lot2RecoverySmokeCheck {
     volatile String status="RUNNING",identity="attempt-1";
     volatile boolean disconnected;
     final java.util.concurrent.atomic.AtomicInteger queryTimeouts=new java.util.concurrent.atomic.AtomicInteger();
+    final java.util.concurrent.atomic.AtomicInteger busyLocks=new java.util.concurrent.atomic.AtomicInteger();
+    final CountDownLatch busyObserved=new CountDownLatch(1);
     final CountDownLatch timeoutObserved=new CountDownLatch(1);
     final CountDownLatch cancelled=new CountDownLatch(1);
     static void verify() throws Exception {
@@ -47,6 +49,17 @@ final class Lot2RecoverySmokeCheck {
                 control.untrack(tracked);
             }
         }
+        for(boolean cancellation:new boolean[]{true,false}) {
+            Lot2RecoverySmokeCheck busy=new Lot2RecoverySmokeCheck();
+            var worker=java.util.concurrent.Executors.newSingleThreadExecutor();
+            try(JobExecutionControl control=new JobExecutionControl(cancellation?980:981,busy.connection(),null,null)) {
+                busy.busyLocks.set(1000);
+                var waiting=worker.submit(()->{try{control.beforeCommit(busy.connection());throw new AssertionError("Changed/cancelled owner committed after contention");}catch(com.privonym.application.service.JobExecutionCancelledException expected){if(!cancellation)throw expected;}catch(IllegalStateException expected){if(cancellation||!expected.getMessage().contains("owner changed"))throw expected;}catch(SQLException e){throw new IllegalStateException(e);}});
+                require(busy.busyObserved.await(2,TimeUnit.SECONDS),"Commit fence contention not injected");
+                if(cancellation)control.cancel();else{busy.identity="new owner";busy.busyLocks.set(0);}
+                waiting.get(2,TimeUnit.SECONDS);
+            }finally{worker.shutdownNow();}
+        }
         Lot2RecoverySmokeCheck db=new Lot2RecoverySmokeCheck();
         try(JobExecutionControl c=new JobExecutionControl(999,db.connection(),null,null)) {
             db.identity="reclaimed";rejects(()->{try{c.beforeCommit(db.connection());}catch(SQLException e){throw new IllegalStateException(e);}});
@@ -59,6 +72,7 @@ final class Lot2RecoverySmokeCheck {
     PreparedStatement statement(String sql){return (PreparedStatement)Proxy.newProxyInstance(PreparedStatement.class.getClassLoader(),new Class<?>[]{PreparedStatement.class},(p,m,a)->{
         if(m.getName().equals("executeQuery")) {
             if(disconnected)throw new SQLException("Injected control connection outage");
+            if(sql.contains("FOR UPDATE NOWAIT")&&busyLocks.getAndUpdate(n->Math.max(0,n-1))>0){busyObserved.countDown();throw new SQLException("Resource busy", "61000",54);}
             if(queryTimeouts.getAndUpdate(n->Math.max(0,n-1))>0){timeoutObserved.countDown();throw new SQLTimeoutException("injected monitor timeout", "HYT00",1013);}
             boolean[] seen={false};String s=status,i=identity;
             return Proxy.newProxyInstance(ResultSet.class.getClassLoader(),new Class<?>[]{ResultSet.class},(r,n,b)->switch(n.getName()){

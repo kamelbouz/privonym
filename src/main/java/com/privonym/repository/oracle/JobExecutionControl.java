@@ -48,12 +48,24 @@ final class JobExecutionControl implements AutoCloseable {
     void untrack(Statement statement){statements.remove(statement);}
     void check(){if(unavailable!=null)throw unavailable;if(cancelled||Thread.currentThread().isInterrupted())throw new JobExecutionCancelledException(jobId);}
     void beforeCommit(Connection repository)throws SQLException {
-        check();String current=read(repository,true);
-        if(!identity.equals(current))throw new IllegalStateException("Execution owner changed; stale worker cannot commit");
-        check();
+        while(true) {
+            check();
+            try {
+                String current=read(repository,true);
+                if(!identity.equals(current))throw new IllegalStateException("Execution owner changed; stale worker cannot commit");
+                check();return;
+            }catch(SQLException busy) {
+                if(busy.getErrorCode()!=54)throw busy;
+                repository.rollback();
+                // A different worker may legitimately hold the fence throughout a
+                // long target commit. NOWAIT keeps contention separate from an
+                // unavailable repository; check cancellation between attempts.
+                try{Thread.sleep(100);}catch(InterruptedException interrupted){Thread.currentThread().interrupt();throw new JobExecutionCancelledException(jobId,interrupted);}
+            }
+        }
     }
     private String read(Connection repository,boolean lock)throws SQLException {
-        try(PreparedStatement query=repository.prepareStatement("SELECT status,"+IDENTITY+" FROM anonymization_job WHERE job_id=?"+(lock?" FOR UPDATE":""))) {
+        try(PreparedStatement query=repository.prepareStatement("SELECT status,"+IDENTITY+" FROM anonymization_job WHERE job_id=?"+(lock?" FOR UPDATE NOWAIT":""))) {
             query.setLong(1,jobId);query.setQueryTimeout(5);
             try(ResultSet row=query.executeQuery()) {
                 if(!row.next())throw new SQLException("Execution owner no longer exists");

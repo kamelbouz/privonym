@@ -235,7 +235,7 @@ public final class PrivonymCli {
                     }
                 } else {
                     result = new ExecuteJobService(repository, repository,
-                            new OracleMeasuredPlanExecutor(connection, target), repository,
+                            new OracleMeasuredPlanExecutor(connection, target,()->DriverManager.getConnection(repositoryUrl,repositoryUser,new String(repositoryPassword))), repository,
                             Instant::now).execute(new ExecuteJobCommand(job.id(), executionMode,
                                     recoveryMode));
                 }

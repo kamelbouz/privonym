@@ -745,7 +745,9 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
 
         if (path.startsWith(JOBS_PATH + "/")) {
             String relative = path.substring((JOBS_PATH + "/").length());
-            if (relative.endsWith("/report.pdf")) {
+            if (relative.endsWith("/recovery")) {
+                handleJobRecovery(relative.substring(0,relative.length()-9),sessionUser(request),request,response,callback);
+            } else if (relative.endsWith("/report.pdf")) {
                 if (requireGet(request,response,callback))
                     handleJobReport(relative.substring(0,relative.length()-11),response,callback);
             } else if (relative.endsWith("/scripts/pre") || relative.endsWith("/scripts/post")) {
@@ -1137,6 +1139,27 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
         } catch (IllegalStateException error) {
             writeJson(response,callback,409,"{\"error\":\"JOB_IN_USE\",\"message\":\""+escape(error.getMessage())+"\"}");
         }
+    }
+
+    private void handleJobRecovery(String identifier,PrivonymUser user,Request request,Response response,Callback callback) {
+        try {
+            long id=Long.parseLong(identifier);
+            if("POST".equals(request.getMethod())) {
+                if(applicationSecurity==null||user==null||!user.administrator()){forbidden(response,callback,"Recovery decisions require an administrator");return;}
+                var f=parseFormParameters(readBody(request));
+                if(!"true".equals(f.get("verified")))throw new IllegalArgumentException("Verify the target outcome and stop the runner before confirming");
+                rulesets.reconcile(id,Long.parseLong(f.getOrDefault("chunkId","0")),f.get("decision"),Long.parseLong(f.getOrDefault("rows","0")),f.get("note"),f.get("confirmation"),user.username());
+            } else if(!requireGet(request,response,callback))return;
+            var view=rulesets.recovery(id);
+            StringBuilder out=new StringBuilder("{\"jobId\":").append(id).append(",\"reference\":\"").append(escape(view.reference())).append("\",\"status\":\"").append(escape(view.status())).append("\",\"canReconcile\":").append(view.canReconcile()).append(",\"canConfirmStopped\":").append(view.canConfirmStopped()).append(",\"steps\":[");
+            boolean comma=false;
+            for(var step:view.steps()){if(comma)out.append(',');comma=true;out.append("{\"table\":\"").append(escape(step.table())).append("\",\"requestedMode\":\"").append(escape(step.requestedMode())).append("\",\"effectiveMode\":\"").append(escape(step.effectiveMode())).append("\",\"reason\":\"").append(escape(step.reason())).append("\"}");}
+            out.append("],\"chunks\":[");comma=false;
+            for(var chunk:view.chunks()){if(comma)out.append(',');comma=true;out.append("{\"chunkId\":").append(chunk.chunkId()).append(",\"stepId\":").append(chunk.stepId()).append(",\"status\":\"").append(escape(chunk.status())).append("\",\"detail\":\"").append(escape(chunk.detail())).append("\",\"unresolved\":").append(chunk.unresolved()).append('}');}
+            writeJson(response,callback,200,out.append("]}").toString());
+        } catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"message\":\""+escape(e.getMessage())+"\"}");}
+        catch(IllegalStateException e){writeJson(response,callback,409,"{\"message\":\""+escape(e.getMessage())+"\"}");}
+        catch(IOException e){writeJson(response,callback,400,"{\"message\":\"Invalid recovery request\"}");}
     }
 
     private void handleJobExecute(String identifier,Response response,Callback callback){try{var result=identifier.matches("[1-9][0-9]*")?rulesets.executeJob(Long.parseLong(identifier)):rulesets.executeJob(identifier);writeJson(response,callback,200,"{\"jobId\":"+result.jobId().value()+",\"status\":\""+result.status()+"\",\"executedSteps\":"+result.executedStepCount()+",\"rowsProcessed\":"+result.rowsProcessed()+"}");}catch(IllegalArgumentException e){writeJson(response,callback,400,"{\"error\":\"JOB_EXECUTION_REJECTED\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(IllegalStateException e){System.err.println("Job execution failed: "+e.getMessage());writeJson(response,callback,409,"{\"error\":\"JOB_EXECUTION_REJECTED\",\"message\":\""+escape(e.getMessage())+"\"}");}catch(RuntimeException e){System.err.println("Job execution failed: "+e.getMessage());writeJson(response,callback,500,"{\"error\":\"JOB_EXECUTION_FAILED\",\"message\":\""+escape(e.getMessage())+"\"}");}}
@@ -2210,6 +2233,9 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             Response response, Callback callback) {
         String method = request.getMethod();
         if ("GET".equals(method) || "HEAD".equals(method) || user.administrator()) return true;
+        if(path.startsWith(JOBS_PATH+"/")&&path.endsWith("/recovery")) {
+            forbidden(response,callback,"Recovery decisions require an administrator");return false;
+        }
         String privilege = null;
         Long rulesetId = null;
         Long versionId = null;

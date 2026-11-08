@@ -215,8 +215,9 @@ public final class OracleRulesetAdministrationAdapter
                 long currentVersionId;
                 long currentRulesetId;
                 String currentStatus;
+                String currentMode;int currentChunkSize;long currentThreshold;
                 try (PreparedStatement statement = connection.prepareStatement("""
-                        SELECT j.job_id,j.status,j.ruleset_version_id,rv.ruleset_id
+                        SELECT j.job_id,j.status,j.ruleset_version_id,rv.ruleset_id,j.execution_mode,j.chunk_size,j.chunk_threshold
                           FROM anonymization_job j JOIN ruleset_version rv
                             ON rv.ruleset_version_id=j.ruleset_version_id
                          WHERE j.job_reference=? FOR UPDATE
@@ -228,6 +229,7 @@ public final class OracleRulesetAdministrationAdapter
                         currentStatus = row.getString("status");
                         currentVersionId = row.getLong("ruleset_version_id");
                         currentRulesetId = row.getLong("ruleset_id");
+                        currentMode=row.getString("execution_mode");currentChunkSize=row.getInt("chunk_size");currentThreshold=row.getLong("chunk_threshold");
                     }
                 }
                 if (isActiveJobStatus(currentStatus)) {
@@ -237,13 +239,17 @@ public final class OracleRulesetAdministrationAdapter
 
                 long targetVersionId;
                 long targetDataSourceId;
+                boolean history=ExecutionRecoveryPolicy.hasHistory(connection,jobId);
+                if(history&&rulesetId!=currentRulesetId)throw new IllegalStateException("An executed Job keeps its Rule Set; create a new Job");
+                ExecutionRecoveryPolicy.requireSameGeometry(currentStatus,history,currentMode,currentChunkSize,currentThreshold,executionMode,chunkSize,chunkThreshold);
                 try (PreparedStatement statement = connection.prepareStatement("""
                         SELECT rv.ruleset_version_id,r.data_source_id
                           FROM ruleset r JOIN ruleset_version rv ON rv.ruleset_id=r.ruleset_id
-                         WHERE r.ruleset_id=? AND rv.status='PUBLISHED'
+                         WHERE r.ruleset_id=? AND rv.status='PUBLISHED' AND (?=0 OR rv.ruleset_version_id=?)
                          ORDER BY rv.version_number DESC FETCH FIRST 1 ROW ONLY
                         """)) {
                     statement.setLong(1, rulesetId);
+                    statement.setInt(2,history?1:0);statement.setLong(3,currentVersionId);
                     try (ResultSet row = statement.executeQuery()) {
                         if (!row.next()) throw new IllegalArgumentException(
                                 "The selected Rule Set has no published version");
@@ -259,6 +265,7 @@ public final class OracleRulesetAdministrationAdapter
                 }
 
                 boolean planReset = currentVersionId != targetVersionId;
+                ExecutionRecoveryPolicy.requireSameVersion(history,currentVersionId,targetVersionId);
                 if (planReset) {
                     rebindJob(connection, jobId, targetVersionId, targetDataSourceId);
                 }
@@ -326,7 +333,7 @@ public final class OracleRulesetAdministrationAdapter
                     jobId = row.getLong(1);
                 }
             }
-            synchronizeJobWithLatestPublishedVersion(repository, jobId);
+            requirePinnedPublishedVersion(repository, jobId);
             OraclePlanningAdapter planning = new OraclePlanningAdapter(repository);
             AnonymizationJob job = planning.getByReference(reference);
             if (job.status() == JobStatus.SUCCEEDED
@@ -404,6 +411,8 @@ public final class OracleRulesetAdministrationAdapter
             }
             if (isActiveStatus(status)) throw new IllegalStateException(
                     "Scripts cannot be changed while the Job is active");
+            if(!status.equals("SUCCEEDED")&&ExecutionRecoveryPolicy.hasHistory(connection,jobId))
+                throw new IllegalStateException("Scripts are pinned during a partial execution; create a new Job to change them");
             if (content == null || content.isBlank()) {
                 try (PreparedStatement statement = connection.prepareStatement(
                         "DELETE FROM job_script WHERE job_id=? AND script_phase=?")) {
@@ -473,6 +482,19 @@ public final class OracleRulesetAdministrationAdapter
     }
 
     @Override
+    public com.privonym.application.service.JobRecoveryView recovery(long jobId) {
+        try(Connection c=open(true)){return JobRecoveryRepository.inspect(c,jobId);}
+        catch(SQLException e){throw failure("inspect Job recovery",e);}
+    }
+    @Override
+    public void reconcile(long jobId,long chunkId,String decision,long rows,String note,String confirmation,String actor) {
+        try(Connection c=open(false)) {
+            try {JobRecoveryRepository.reconcile(c,jobId,chunkId,decision,rows,note,confirmation,actor);c.commit();}
+            catch(SQLException|RuntimeException e){c.rollback();throw e;}
+        } catch(SQLException e){throw failure("reconcile Job",e);}
+    }
+
+    @Override
     public void cancelJob(long jobId) {
         try (Connection connection = open(false)) {
             try {
@@ -501,9 +523,6 @@ public final class OracleRulesetAdministrationAdapter
                     }
                 }
                 boolean localExecution = OracleParallelPlanExecutor.cancel(jobId);
-                if (!localExecution) {
-                    finalizeOrphanedExecution(connection, jobId);
-                }
                 try (PreparedStatement statement = connection.prepareStatement(localExecution ? """
                         INSERT INTO job_event
                             (job_id,event_timestamp,severity,event_code,message,details_json)
@@ -512,8 +531,8 @@ public final class OracleRulesetAdministrationAdapter
                         """ : """
                         INSERT INTO job_event
                             (job_id,event_timestamp,severity,event_code,message,details_json)
-                        VALUES (?,SYSTIMESTAMP,'WARN','ORPHANED_EXECUTION_CANCELLED',
-                                'Orphaned execution finalized after server restart',NULL)
+                        VALUES (?,SYSTIMESTAMP,'WARN','JOB_CANCELLATION_PENDING',
+                                'Cancellation pending: waiting for the external runner to confirm rollback',NULL)
                         """)) {
                     statement.setLong(1, jobId);
                     statement.executeUpdate();
@@ -528,56 +547,30 @@ public final class OracleRulesetAdministrationAdapter
         }
     }
 
-    private static void finalizeOrphanedExecution(Connection connection, long jobId)
-            throws SQLException {
-        try (PreparedStatement statement = connection.prepareStatement("""
-                UPDATE job_step_attempt
-                   SET status='CANCELLED',ended_at=SYSTIMESTAMP,
-                       heartbeat_at=SYSTIMESTAMP,error_code=NULL,error_message=NULL
-                 WHERE job_step_id IN
-                       (SELECT job_step_id FROM job_step WHERE job_id=?)
-                   AND status='RUNNING'
-                """)) {
-            statement.setLong(1, jobId);
-            statement.executeUpdate();
-        }
-        try (PreparedStatement statement = connection.prepareStatement("""
-                UPDATE job_chunk SET status='CANCELLED',ended_at=SYSTIMESTAMP,
-                       error_message='Orphaned execution cancelled after server restart'
-                 WHERE job_step_id IN
-                       (SELECT job_step_id FROM job_step WHERE job_id=?)
-                   AND status='RUNNING'
-                """)) {
-            statement.setLong(1, jobId);
-            statement.executeUpdate();
-        }
-        try (PreparedStatement statement = connection.prepareStatement("""
-                UPDATE job_step SET status='CANCELLED',ended_at=SYSTIMESTAMP
-                 WHERE job_id=? AND status='RUNNING'
-                """)) {
-            statement.setLong(1, jobId);
-            statement.executeUpdate();
-        }
-        try (PreparedStatement statement = connection.prepareStatement("""
-                UPDATE anonymization_job
-                   SET status='CANCELLED',ended_at=SYSTIMESTAMP,
-                       heartbeat_at=SYSTIMESTAMP,error_code=NULL,error_message=NULL
-                 WHERE job_id=? AND status='CANCELLING'
-                """)) {
-            statement.setLong(1, jobId);
-            if (statement.executeUpdate() != 1) {
-                throw new SQLException("Orphaned Job cancellation status changed concurrently");
-            }
-        }
-    }
-
     /** Runs or resumes a Job through validation and final reporting. */
     public JobReport executeJobToCompletion(long jobId) {
         try (Connection repository = open(false)) {
-            synchronizeJobWithLatestPublishedVersion(repository, jobId);
+            requirePinnedPublishedVersion(repository, jobId);
             OraclePlanningAdapter planning = new OraclePlanningAdapter(repository);
             AnonymizationJob job = planning.get(new com.privonym.domain.job.JobId(jobId));
-            if (job.status() == JobStatus.SUCCEEDED
+            boolean resumingExecution=job.status()==JobStatus.EXECUTION_FAILED||job.status()==JobStatus.CANCELLED
+                    ||job.status()==JobStatus.PREFLIGHT_FAILED&&ExecutionRecoveryPolicy.hasChunks(repository,jobId);
+            if(resumingExecution) {
+                ScriptPhaseJournal.requireReconciled(repository,jobId);
+                ExecutionRecoveryPolicy.requireReconciled(repository,jobId);
+                try(PreparedStatement update=repository.prepareStatement("UPDATE anonymization_job SET status='PLANNED',ended_at=NULL,error_code=NULL,error_message=NULL WHERE job_id=? AND status=?")) {
+                    update.setLong(1,jobId);update.setString(2,job.status().name());if(update.executeUpdate()!=1)throw new IllegalStateException("Job was claimed concurrently; refresh before retrying");
+                }
+                try(PreparedStatement update=repository.prepareStatement("UPDATE job_step SET status='READY' WHERE job_id=? AND status<>'SUCCEEDED' AND step_type IN('PRECHECK','ANONYMIZE_TABLE')")) {
+                    update.setLong(1,jobId);update.executeUpdate();
+                }
+                repository.commit();job=planning.get(job.id());
+            } else if(job.status()==JobStatus.VALIDATION_FAILED) {
+                try(PreparedStatement update=repository.prepareStatement("UPDATE anonymization_job SET status='VALIDATING',ended_at=NULL WHERE job_id=? AND status='VALIDATION_FAILED'")) {
+                    update.setLong(1,jobId);if(update.executeUpdate()!=1)throw new IllegalStateException("Validation retry was claimed concurrently");
+                }
+                repository.commit();job=planning.get(job.id());
+            } else if (job.status() == JobStatus.SUCCEEDED
                     || job.status() == JobStatus.PREFLIGHT_FAILED
                     || job.status() == JobStatus.PLAN_FAILED
                     || job.status() == JobStatus.EXECUTION_FAILED
@@ -633,12 +626,12 @@ public final class OracleRulesetAdministrationAdapter
                     job = planning.get(job.id());
                 }
                 if (job.status() == JobStatus.PREFLIGHT_PASSED) {
-                    executeStoredScript(repository, target, job.id().value(), "PRE");
+                    if(!resumingExecution)executeStoredScript(repository, target, job.id().value(), "PRE");
                     boolean relationshipAware = hasRelationshipAwareToken(repository,
                             job.id().value());
                     if (relationshipAware) {
                         new ExecuteJobService(planning, planning,
-                                new OracleMeasuredPlanExecutor(repository, target),
+                                new OracleMeasuredPlanExecutor(repository, target,()->open(false)),
                                 planning, Instant::now).execute(new ExecuteJobCommand(
                                         job.id(), ExecutionMode.DIRECT, RecoveryMode.NEW));
                     } else {
@@ -1368,40 +1361,15 @@ public final class OracleRulesetAdministrationAdapter
         }
     }
 
-    private static void synchronizeJobWithLatestPublishedVersion(Connection connection, long jobId)
-            throws SQLException {
-        long currentVersionId;
-        long latestVersionId;
-        long dataSourceId;
-        String status;
-        try (PreparedStatement statement = connection.prepareStatement("""
-                SELECT j.ruleset_version_id, j.status, r.data_source_id,
-                       (SELECT ruleset_version_id FROM ruleset_version latest
-                         WHERE latest.ruleset_id=rv.ruleset_id AND latest.status='PUBLISHED'
-                         ORDER BY latest.version_number DESC FETCH FIRST 1 ROW ONLY) latest_version_id
-                  FROM anonymization_job j
-                  JOIN ruleset_version rv ON rv.ruleset_version_id=j.ruleset_version_id
-                  JOIN ruleset r ON r.ruleset_id=rv.ruleset_id
-                 WHERE j.job_id=? FOR UPDATE
-                """)) {
-            statement.setLong(1, jobId);
-            try (ResultSet row = statement.executeQuery()) {
-                if (!row.next()) throw new IllegalArgumentException("Job was not found: " + jobId);
-                currentVersionId = row.getLong("ruleset_version_id");
-                status = row.getString("status");
-                dataSourceId = row.getLong("data_source_id");
-                latestVersionId = row.getLong("latest_version_id");
-                if (row.wasNull()) throw new IllegalStateException("No published Rule Set version is available");
+    private static void requirePinnedPublishedVersion(Connection connection,long jobId)throws SQLException {
+        try(PreparedStatement query=connection.prepareStatement("SELECT rv.status FROM anonymization_job j JOIN ruleset_version rv ON rv.ruleset_version_id=j.ruleset_version_id WHERE j.job_id=?")) {
+            query.setLong(1,jobId);
+            try(ResultSet row=query.executeQuery()) {
+                if(!row.next())throw new IllegalArgumentException("Job not found");
+                if(!row.getString(1).equals("PUBLISHED"))throw new IllegalStateException("The Job's pinned Rule Set version is no longer published; create a new Job explicitly");
             }
         }
-        if (currentVersionId == latestVersionId) return;
-        if (isActiveJobStatus(status)) {
-            throw new IllegalStateException("Job version cannot change while it is " + status);
-        }
-        rebindJob(connection, jobId, latestVersionId, dataSourceId);
-        connection.commit();
     }
-
     private static boolean isActiveJobStatus(String status) {
         return List.of("PLANNING", "PREFLIGHTING", "RUNNING", "RETRYING", "PAUSING",
                 "CANCELLING", "VALIDATING").contains(status);

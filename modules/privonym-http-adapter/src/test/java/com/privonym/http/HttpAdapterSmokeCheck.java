@@ -380,7 +380,7 @@ public final class HttpAdapterSmokeCheck {
                             && jobsPage.body().contains("method:'PUT'")
                             && jobsPage.body().contains("run.textContent=cancellable?'CANCEL EXECUTION':rerun?'RE-EXECUTE':'EXECUTE'")
                             && jobsPage.body().contains("'/cancel',{method:'POST'")
-                            && jobsPage.body().contains("options.append(report,edit,remove)")
+                            && jobsPage.body().contains("options.append(report,recovery,edit,remove)")
                             && jobsPage.body().contains("class=\"dots-icon\"")
                             && jobsPage.body().contains("action.className='job-actions-cell'")
                             && jobsPage.body().contains("document.body.appendChild(options)")
@@ -784,7 +784,7 @@ public final class HttpAdapterSmokeCheck {
                 if(List.of("EDITOR","OTHER").contains(username)&&"Valid-password1!".equals(new String(password)))
                     return new PrivonymUser(username.equals("EDITOR")?3:4,username,username,false,true,Set.of(ApplicationSecurity.RULESET_MODIFY_OWN));
                 if ("MANAGER".equals(username) && "Valid-password1!".equals(new String(password)))
-                    return new PrivonymUser(2,"MANAGER","Manager",false,true,Set.of(ApplicationSecurity.USER_MANAGE));
+                    return new PrivonymUser(2,"MANAGER","Manager",false,true,Set.of(ApplicationSecurity.USER_MANAGE,ApplicationSecurity.JOB_MANAGE));
                 if (!"ADMIN".equalsIgnoreCase(username) || !"Valid-password1!".equals(new String(password)))
                     throw new IllegalArgumentException("invalid");
                 return administrator;
@@ -858,6 +858,9 @@ public final class HttpAdapterSmokeCheck {
                 require(securedClient.send(draftRequest,HttpResponse.BodyHandlers.ofString()).statusCode()==(account.equals("EDITOR")?201:403),
                         "Discovery version creation must enforce Rule Set ownership and MODIFY_OWN");
             }
+            var recoveryRequest=HttpRequest.newBuilder(URI.create("http://127.0.0.1:"+securedPort+"/api/v1/jobs/61/recovery")).header("Cookie",managerCookie)
+                    .POST(HttpRequest.BodyPublishers.ofString("verified=true&decision=ROLLBACK")).build();
+            require(securedClient.send(recoveryRequest,HttpResponse.BodyHandlers.ofString()).statusCode()==403,"JOB_MANAGE must not permit administrator recovery decisions");
             for(String account:List.of("EDITOR","OTHER","CREATOR")) {
                 var login=sendForm(securedClient,securedPort,"/api/v1/security/login","username="+account+"&password=Valid-password1%21","");
                 String importCookie=login.headers().firstValue("Set-Cookie").orElseThrow().split(";",2)[0];

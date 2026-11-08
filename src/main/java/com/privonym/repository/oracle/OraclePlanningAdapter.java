@@ -51,6 +51,8 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
         SavedPlanLoader, ExecutionJournal, ValidationJournal, JobReportRepository {
     private final Connection connection;
     private final OracleJobPlanRepository legacyPlans = new OracleJobPlanRepository();
+    private String executionIdentity;
+    private long executionIdentityJobId;
 
     public OraclePlanningAdapter(Connection connection) {
         this.connection = Objects.requireNonNull(connection, "connection");
@@ -193,7 +195,7 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
         try {
             String claim = """
                     UPDATE anonymization_job
-                       SET status = 'RUNNING', started_at = COALESCE(started_at, SYSTIMESTAMP),
+                       SET status = 'RUNNING', started_at = SYSTIMESTAMP,
                            heartbeat_at = SYSTIMESTAMP, error_code = NULL, error_message = NULL
                      WHERE job_id = ? AND status IN ('PREFLIGHT_PASSED','EXECUTION_FAILED')
                     """;
@@ -201,6 +203,8 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
                 statement.setLong(1, runningJob.id().value());
                 requireOne(statement.executeUpdate(), "claim job for execution");
             }
+            executionIdentity=executionIdentity(connection,runningJob.id().value(),false);
+            executionIdentityJobId=runningJob.id().value();
             try (PreparedStatement precheck = connection.prepareStatement("""
                     UPDATE job_step SET status = 'SUCCEEDED',
                            started_at = COALESCE(started_at, SYSTIMESTAMP), ended_at = SYSTIMESTAMP
@@ -224,6 +228,7 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
     public void succeed(AnonymizationJob validatingJob, ExecutionOutcome outcome,
             ApplicationAuditEvent event) {
         try {
+            requireExecutionOwner(validatingJob.id());
             for (StepExecutionResult result : outcome.steps()) {
                 finishStep(result.jobStepId(), "SUCCEEDED", result.rowsProcessed(), null);
             }
@@ -240,18 +245,8 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
     public void fail(AnonymizationJob failedJob, ExecutablePlan plan, RuntimeException error,
             ApplicationAuditEvent event) {
         try {
-            for (ExecutableStep step : plan.steps()) {
-                long committedRows = 0;
-                try (PreparedStatement chunks = connection.prepareStatement(
-                        "SELECT COALESCE(SUM(rows_processed),0) FROM job_chunk "
-                        + "WHERE job_step_id=? AND status='SUCCEEDED'")) {
-                    chunks.setLong(1, step.jobStepId());
-                    try (ResultSet row = chunks.executeQuery()) {
-                        row.next(); committedRows = row.getLong(1);
-                    }
-                }
-                finishStep(step.jobStepId(), "FAILED", committedRows, error);
-            }
+            requireExecutionOwner(failedJob.id());
+            finishInterruptedSteps(plan,error,false);
             updateExecutionJob(failedJob.id(), "EXECUTION_FAILED", error);
             append(event);
             connection.commit();
@@ -265,6 +260,8 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
     public void cancel(AnonymizationJob cancelledJob, ExecutablePlan plan,
             ApplicationAuditEvent event) {
         try {
+            requireExecutionOwner(cancelledJob.id());
+            finishInterruptedSteps(plan,new IllegalStateException("Execution cancelled"),true);
             try (PreparedStatement attempts = connection.prepareStatement("""
                     UPDATE job_step_attempt
                        SET status='CANCELLED',ended_at=SYSTIMESTAMP,
@@ -531,7 +528,7 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
     private void markStepStarted(ExecutableStep step) throws SQLException {
         try (PreparedStatement update = connection.prepareStatement("""
                 UPDATE job_step SET status = 'RUNNING', started_at = SYSTIMESTAMP,
-                       ended_at = NULL WHERE job_step_id = ? AND status IN ('READY','FAILED')
+                       ended_at = NULL WHERE job_step_id = ? AND status IN ('READY','FAILED','SUCCEEDED','PENDING','CANCELLED')
                 """)) {
             update.setLong(1, step.jobStepId());
             requireOne(update.executeUpdate(), "start execution step");
@@ -579,13 +576,38 @@ public final class OraclePlanningAdapter implements JobRepository, RulesetReposi
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement("""
                 UPDATE anonymization_job SET status = ?, heartbeat_at = SYSTIMESTAMP,
-                       error_code = ?, error_message = ? WHERE job_id = ? AND status = 'RUNNING'
+                       error_code = ?, error_message = ?,ended_at=CASE WHEN ?='EXECUTION_FAILED' THEN SYSTIMESTAMP ELSE NULL END
+                 WHERE job_id = ? AND status IN('RUNNING','CANCELLING')
                 """)) {
             statement.setString(1, status);
             setError(statement, 2, 3, error);
-            statement.setLong(4, id.value());
+            statement.setString(4,status);statement.setLong(5, id.value());
             requireOne(statement.executeUpdate(), "finish job execution");
         }
+    }
+
+    private void finishInterruptedSteps(ExecutablePlan plan,RuntimeException error,boolean cancelled)throws SQLException {
+        for(ExecutableStep step:plan.steps()) {
+            long total,rows,incomplete;Long expected=null;
+            try(PreparedStatement q=connection.prepareStatement("SELECT COUNT(*),COALESCE(SUM(CASE WHEN status='SUCCEEDED' THEN rows_processed ELSE 0 END),0),COALESCE(SUM(CASE WHEN status<>'SUCCEEDED' THEN 1 ELSE 0 END),0) FROM job_chunk WHERE job_step_id=?")) {
+                q.setLong(1,step.jobStepId());try(ResultSet r=q.executeQuery()){r.next();total=r.getLong(1);rows=r.getLong(2);incomplete=r.getLong(3);}
+            }
+            try(PreparedStatement q=connection.prepareStatement("SELECT MAX(metric_value) FROM job_metric WHERE job_step_id=? AND metric_name='ROWS_EXPECTED'")) {
+                q.setLong(1,step.jobStepId());try(ResultSet r=q.executeQuery()){r.next();long value=r.getLong(1);if(!r.wasNull())expected=value;}
+            }
+            String status=ExecutionRecoveryPolicy.stepStatus(total,incomplete,rows,expected,cancelled);
+            finishStep(step.jobStepId(),status.equals("PENDING")?"CANCELLED":status,rows,status.equals("SUCCEEDED")?null:error);
+            if(status.equals("PENDING"))try(PreparedStatement q=connection.prepareStatement("UPDATE job_step SET status='PENDING',ended_at=NULL WHERE job_step_id=?")){q.setLong(1,step.jobStepId());q.executeUpdate();}
+        }
+    }
+    private static String executionIdentity(Connection c,long jobId,boolean lock)throws SQLException {
+        try(PreparedStatement q=c.prepareStatement("SELECT TO_CHAR(started_at,'YYYY-MM-DD HH24:MI:SS.FF9 TZH:TZM') FROM anonymization_job WHERE job_id=?"+(lock?" FOR UPDATE":""))) {
+            q.setLong(1,jobId);try(ResultSet r=q.executeQuery()){if(!r.next())throw new SQLException("Execution owner no longer exists");return r.getString(1);}
+        }
+    }
+    private void requireExecutionOwner(JobId jobId)throws SQLException {
+        if(executionIdentity!=null&&executionIdentityJobId==jobId.value()&&!executionIdentity.equals(executionIdentity(connection,jobId.value(),true)))
+            throw new IllegalStateException("Stale execution cannot update the current Job journal");
     }
 
     private static void setError(PreparedStatement statement, int codeIndex,

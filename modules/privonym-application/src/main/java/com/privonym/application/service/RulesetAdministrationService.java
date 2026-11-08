@@ -158,6 +158,10 @@ public final class RulesetAdministrationService implements RulesetAdministration
         if (jobId <= 0) throw new IllegalArgumentException("Job identifier must be positive");
         repository.cancelJob(jobId);
     }
+    @Override public JobRecoveryView recovery(long jobId){if(jobId<=0)throw new IllegalArgumentException("Invalid Job");return repository.recovery(jobId);}
+    @Override public void reconcile(long jobId,long chunkId,String decision,long rows,String note,String confirmation,String actor){
+        if(jobId<=0)throw new IllegalArgumentException("Invalid Job");repository.reconcile(jobId,chunkId,decision,rows,note,confirmation,actor);
+    }
     @Override public RulesetSqlExport exportSql(long rulesetId, long versionId) {
         if (rulesetId <= 0 || versionId <= 0) {
             throw new IllegalArgumentException("Invalid ruleset or version identifier");

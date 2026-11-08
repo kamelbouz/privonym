@@ -1,5 +1,7 @@
 # Privonym
 
+Lot 2 : reprise, annulation et récupération : [LOT2_EXECUTION.md](LOT2_EXECUTION.md).
+
 Corrections de confidentialité et d'accès du 8 novembre 2026 :
 [LOT1_CONFIDENTIALITE.md](LOT1_CONFIDENTIALITE.md).
 

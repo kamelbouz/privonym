@@ -24,6 +24,7 @@ public final class OracleDirectPlanExecutor implements TargetPlanExecutor {
     @Override
     public ExecutionOutcome execute(ExecutablePlan plan) {
         List<StepExecutionResult> results = new ArrayList<>();
+        boolean commitAttempted=false;
         try {
             for (ExecutableStep step : plan.steps()) {
                 validate(step);
@@ -32,14 +33,17 @@ public final class OracleDirectPlanExecutor implements TargetPlanExecutor {
                             step.jobStepId(), statement.executeUpdate()));
                 }
             }
+            commitAttempted=true;
             target.commit();
             return new ExecutionOutcome(results);
         } catch (SQLException | RuntimeException error) {
+            boolean rolledBack=true;
             try {
                 target.rollback();
             } catch (SQLException rollbackError) {
-                error.addSuppressed(rollbackError);
+                rolledBack=false;error.addSuppressed(rollbackError);
             }
+            if(commitAttempted||!rolledBack)throw new TargetOutcomeUncertainException("DIRECT target outcome is uncertain; verify the target before retry",error);
             throw new IllegalStateException(
                     "DIRECT target execution was rolled back: " + error.getMessage(), error);
         }

@@ -1,5 +1,7 @@
 # Corrections du 24 octobre 2026
 
+Lot 2 — exécution et reprise : [LOT2_EXECUTION.md](LOT2_EXECUTION.md).
+
 ## Lot 1 du 8 novembre 2026
 
 Les imports authentifiés contrôlent la propriété du Rule Set existant et ne la

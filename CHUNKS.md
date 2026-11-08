@@ -1,5 +1,7 @@
 # Correctifs des chunks portables — 24 octobre 2026
 
+Lot 2 — reprise et réconciliation : [LOT2_EXECUTION.md](LOT2_EXECUTION.md).
+
 Ces corrections traitent des défauts constatés dans le code. Elles ne constituent
 pas un diagnostic de la démonstration du 23 septembre, qui reste à reproduire.
 

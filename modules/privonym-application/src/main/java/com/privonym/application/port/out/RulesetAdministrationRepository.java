@@ -31,6 +31,8 @@ public interface RulesetAdministrationRepository {
     ExecuteJobResult executeJob(String reference);
     ExecuteJobResult executeJob(long jobId);
     void cancelJob(long jobId);
+    default com.privonym.application.service.JobRecoveryView recovery(long jobId){throw new UnsupportedOperationException("Job recovery unavailable");}
+    default void reconcile(long jobId,long chunkId,String decision,long rows,String note,String confirmation,String actor){throw new UnsupportedOperationException("Job recovery unavailable");}
     void saveJobScript(String reference, String phase, String fileName, String content);
     RulesetSqlExport exportSql(long rulesetId, long versionId);
 }

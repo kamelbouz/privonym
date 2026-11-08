@@ -63,6 +63,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
     private final int chunkSize;
     private final long chunkThreshold;
     private final AtomicBoolean cancellationRequested = new AtomicBoolean();
+    private volatile JobExecutionControl executionControl;
     private final Set<Statement> activeStatements = ConcurrentHashMap.newKeySet();
     private volatile long activeJobId;
 
@@ -108,6 +109,9 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             return thread;
         };
         try {
+            try(Connection owner=openRepository()) {
+                executionControl=new JobExecutionControl(jobId,owner,this::openRepository,this::signalCancellation);
+            }
             List<PreparedStep> prepared = prepare(plan);
             Map<Long,Integer> dependencyGroups = dependencyGroups(jobId);
             Map<Integer,Map<String,List<PreparedStep>>> levels = new TreeMap<>();
@@ -150,6 +154,8 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                 }
             }
             return new ExecutionOutcome(results);
+        } catch (SQLException error) {
+            throw new IllegalStateException("Unable to establish execution ownership",error);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             if (cancellationRequested.get()) {
@@ -161,6 +167,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             if (cause instanceof RuntimeException runtime) throw runtime;
             throw new IllegalStateException("Parallel Job execution failed", cause);
         } finally {
+            if(executionControl!=null){executionControl.close();executionControl=null;}
             activeStatements.clear();
             ACTIVE_EXECUTIONS.remove(jobId, this);
             activeJobId = 0;
@@ -240,6 +247,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                         step.jobStepId());
                 TargetRowCountEvidence.capture(repository,target,step.jobStepId(),operation.table(),operation.type(),
                         expected,findTopLevelWhere(step.generatedCode(),operation.targetEnd())>=0,!completed.isEmpty());
+                saveMetric(repository, step.jobStepId(), "EXECUTION_CHUNKED", chunked?1:0, "BOOLEAN");
                 saveMetric(repository, step.jobStepId(), "ROWS_EXPECTED", expected, "ROWS");
                 long chunks = chunked ? Math.max(1L, (expected + chunkSize - 1L) / chunkSize) : 1L;
                 saveMetric(repository, step.jobStepId(), "CHUNKS_TOTAL", chunks, "CHUNKS");
@@ -360,6 +368,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                             primaryKey)
                             : executeDirect(target, step.generatedCode(), operation, expected);
                     checkCancellation();
+                    if(executionControl!=null)executionControl.beforeCommit(repository);
                     commitAttempted = true;
                     target.commit();
                     completeChunk(repository, chunkId, rows);
@@ -367,11 +376,13 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                 } catch (SQLException | RuntimeException error) {
                     boolean rolledBack = rollback(target, error);
                     if (commitAttempted) {
+                        recordUncertain(repository,chunkId,"PRIVONYM-COMMIT-UNKNOWN: "+error.getMessage(),error);
                         throw new IllegalStateException("Chunk " + chunkId
                                 + " has an uncertain commit outcome. Automatic retry is blocked; "
                                 + "reconcile target data and the chunk journal before resuming.", error);
                     }
                     if (!rolledBack) {
+                        recordUncertain(repository,chunkId,"PRIVONYM-ROLLBACK-UNCONFIRMED: "+error.getMessage(),error);
                         throw new IllegalStateException("Chunk " + chunkId
                                 + " rollback was not confirmed. Automatic retry is blocked.", error);
                     }
@@ -664,9 +675,11 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
         statement.setQueryTimeout(queryTimeoutSeconds());
         activeStatements.add(statement);
         try {
+            if(executionControl!=null)executionControl.track(statement);
             checkCancellation();
             return statement.executeQuery();
         } finally {
+            if(executionControl!=null)executionControl.untrack(statement);
             activeStatements.remove(statement);
         }
     }
@@ -675,11 +688,13 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
         statement.setQueryTimeout(queryTimeoutSeconds());
         activeStatements.add(statement);
         try {
+            if(executionControl!=null)executionControl.track(statement);
             checkCancellation();
             int affected = statement.executeUpdate();
             checkCancellation();
             return affected;
         } finally {
+            if(executionControl!=null)executionControl.untrack(statement);
             activeStatements.remove(statement);
         }
     }
@@ -989,12 +1004,16 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
     /** Requests cancellation of the executor running in this server process. */
     public static boolean cancel(long jobId) {
         OracleParallelPlanExecutor executor = ACTIVE_EXECUTIONS.get(jobId);
-        if (executor == null) return false;
+        if (executor == null) return JobExecutionControl.cancel(jobId);
         executor.requestCancellation();
         return true;
     }
 
     private void requestCancellation() {
+        if(executionControl!=null){executionControl.cancel();return;}
+        signalCancellation();
+    }
+    private void signalCancellation() {
         cancellationRequested.set(true);
         for (Statement statement : activeStatements) {
             try {
@@ -1005,7 +1024,14 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
         }
     }
 
+    private static void recordUncertain(Connection repository,long chunkId,String detail,Throwable failure) {
+        try(PreparedStatement update=repository.prepareStatement("UPDATE job_chunk SET error_message=? WHERE chunk_id=? AND status IN('RUNNING','CANCELLED')")) {
+            update.setString(1,detail.substring(0,Math.min(4000,detail.length())));update.setLong(2,chunkId);update.executeUpdate();repository.commit();
+        }catch(SQLException error){failure.addSuppressed(error);rollback(repository,error);}
+    }
+
     private void checkCancellation() {
+        if(executionControl!=null)executionControl.check();
         if (cancellationRequested.get() || Thread.currentThread().isInterrupted()) {
             throw new JobExecutionCancelledException(activeJobId);
         }

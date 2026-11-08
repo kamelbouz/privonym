@@ -30,16 +30,26 @@ public final class OracleMeasuredPlanExecutor implements TargetPlanExecutor {
             "(?is)^\\s*TRUNCATE\\s+TABLE\\s+((?:\\\"[^\\\"]+\\\"|[A-Za-z0-9_$#]+)(?:\\s*\\.\\s*(?:\\\"[^\\\"]+\\\"|[A-Za-z0-9_$#]+))?)\\s*$");
     private final Connection repository;
     private final Connection target;
+    private final ExecutionControlConnections controlConnections;
 
     public OracleMeasuredPlanExecutor(Connection repository, Connection target) {
+        this(repository,target,null);
+    }
+    public OracleMeasuredPlanExecutor(Connection repository,Connection target,ExecutionControlConnections controlConnections) {
         this.repository = Objects.requireNonNull(repository, "repository");
         this.target = Objects.requireNonNull(target, "target");
+        this.controlConnections=controlConnections;
     }
 
     @Override
     public ExecutionOutcome execute(ExecutablePlan plan) {
         List<StepExecutionResult> results = new ArrayList<>();
-        try {
+        boolean commitAttempted=false;
+        boolean journalStarted=false;
+        try(JobExecutionControl control=new JobExecutionControl(plan.jobId().value(),repository,controlConnections,null)) {
+            List<StepExecutionResult> completed=DirectExecutionJournal.completed(repository,plan);
+            if(!completed.isEmpty())return new ExecutionOutcome(completed);
+            DirectExecutionJournal.start(repository,plan);journalStarted=true;
             List<RelationshipConstraint> constraints = relationshipConstraints(
                     plan.jobId().value());
             deferOrDisableConstraints(constraints);
@@ -52,23 +62,39 @@ public final class OracleMeasuredPlanExecutor implements TargetPlanExecutor {
                         : Integer.compare(left.stepNumber(), right.stepNumber());
             });
             for (ExecutableStep step : ordered) {
+                control.check();
                 validate(step);
                 Operation operation = operation(step.generatedCode());
                 long expected = expectedRows(step.generatedCode(), operation);
                 TargetRowCountEvidence.capture(repository,target,step.jobStepId(),operation.table(),operation.type(),
                         expected,findTopLevelWhere(step.generatedCode(),operation.targetEnd())>=0,false);
                 saveExpectedRows(step.jobStepId(), expected);
+                repository.commit();
                 try (PreparedStatement statement = target.prepareStatement(step.generatedCode())) {
-                    int affected = statement.executeUpdate();
+                    if(operation.type().equals("TRUNCATE"))commitAttempted=true;
+                    control.track(statement);
+                    int affected;
+                    try{affected=statement.executeUpdate();control.check();}finally{control.untrack(statement);}
                     long processed = operation.type().equals("TRUNCATE") ? expected : affected;
+                    if(processed!=expected)throw new SQLException("DIRECT affected row count differs from the captured population");
                     results.add(new StepExecutionResult(step.jobStepId(), processed));
                 }
             }
             restoreConstraints(constraints);
+            control.beforeCommit(repository);
+            commitAttempted=true;
             target.commit();
+            DirectExecutionJournal.complete(repository,results);
             return new ExecutionOutcome(results);
         } catch (SQLException | RuntimeException error) {
-            try { target.rollback(); } catch (SQLException rollbackError) { error.addSuppressed(rollbackError); }
+            boolean rolledBack=true;
+            try { target.rollback(); } catch (SQLException rollbackError) { rolledBack=false;error.addSuppressed(rollbackError); }
+            boolean confirmed=!commitAttempted&&rolledBack;
+            boolean cancelled=error instanceof com.privonym.application.service.JobExecutionCancelledException;
+            try{repository.rollback();}catch(SQLException rollbackError){error.addSuppressed(rollbackError);}
+            if(journalStarted)DirectExecutionJournal.failed(repository,plan,error,confirmed,cancelled,confirmed?"PRIVONYM-ROLLBACK-CONFIRMED: ":commitAttempted?"PRIVONYM-COMMIT-UNKNOWN: ":"PRIVONYM-ROLLBACK-UNCONFIRMED: ");
+            if(!confirmed)throw new TargetOutcomeUncertainException("DIRECT target outcome is uncertain; recovery verification is required before retry",error);
+            if(cancelled)throw (com.privonym.application.service.JobExecutionCancelledException)error;
             throw new IllegalStateException("DIRECT target execution was rolled back: " + error.getMessage(), error);
         }
     }

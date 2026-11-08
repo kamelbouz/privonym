@@ -10,6 +10,8 @@ public final class OracleSqlServerPlanSmokeCheck {
         OracleFilteredPlanSmokeCheck.verify();
         PortableChunkSmokeCheck.verify();
         AuditRemediationSmokeCheck.verify();
+        Lot2RecoverySmokeCheck.verify();
+        Lot2DirectRecoverySmokeCheck.verify();
         CommitRecoverySmokeCheck.verify();
         ChunkResumeSmokeCheck.verify();
         FailureReportSmokeCheck.verify();

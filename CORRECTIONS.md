@@ -2,6 +2,11 @@
 
 Import Oracle fidèle : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
 
+L'import reconnaît également `CONCAT('préfixe',ID_USER)` comme expression
+Oracle exacte. Les préfixes et les dépendances à une autre colonne sont
+conservés ; ces expressions ne restent plus `UNRESOLVED` du seul fait de
+l'utilisation de `CONCAT`.
+
 ## Annulation des comptages de préparation — 9 novembre 2026
 
 Le mode parallèle conserve désormais les requêtes JDBC dans le contrôle

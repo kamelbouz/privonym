@@ -18,6 +18,13 @@ final class ExactOracleImportSmokeCheck {
  }
  static void verify() {
   var parser=new OracleSqlInventoryPreviewService();var p=parser.parse(fixture());
+  for(String prefix:List.of("COMMON_","FIRST_NAME_","LAST_NAME_","USER_")) {
+   String expression="CONCAT('"+prefix+"',ID_USER)";
+   var concatenation=parser.parse("UPDATE T SET NM_USER="+expression+";").tables().get(0).columns().get(0);
+   require(concatenation.matchStatus().equals("MATCHED")
+     &&concatenation.algorithmCode().equals(OracleImportedExpression.ALGORITHM)
+     &&expression.equals(concatenation.parameters().get("expression")),"CONCAT must preserve both the literal prefix and source column");
+  }
   require(p.tables().size()==5&&p.columnCount()==7,"Five business tables and seven assignments required");
   require(p.tables().get(0).filterExpression().equals("ROLE='CLIENT' OR ROLE='BROKER'"),"Business predicate changed");
   require(p.tables().get(0).columns().get(0).sourceExpression().equals(p.tables().get(0).columns().get(1).sourceExpression()),"Cross-column derivation lost");

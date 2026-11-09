@@ -3,7 +3,7 @@ import java.util.*;
 /** Restricted scalar expressions only: no arbitrary packages, subqueries or statements. */
 public final class OracleImportedExpression {
  public static final String ALGORITHM="ORACLE_EXPRESSION_EXACT";
- private static final Set<String> FUNCTIONS=Set.of("SUBSTR","SUBSTRB","INSTR","LENGTH","LENGTHB","NVL","NVL2","COALESCE","NULLIF","REGEXP_REPLACE","REGEXP_SUBSTR","REGEXP_INSTR","CHR","LOWER","UPPER","TRIM","LTRIM","RTRIM","REPLACE","TRANSLATE","TO_CHAR","TO_DATE","TO_NUMBER","TO_CLOB","ROUND","TRUNC","MOD","ABS","CEIL","FLOOR","DECODE","GREATEST","LEAST","ADD_MONTHS","STANDARD_HASH");
+ private static final Set<String> FUNCTIONS=Set.of("CONCAT","SUBSTR","SUBSTRB","INSTR","LENGTH","LENGTHB","NVL","NVL2","COALESCE","NULLIF","REGEXP_REPLACE","REGEXP_SUBSTR","REGEXP_INSTR","CHR","LOWER","UPPER","TRIM","LTRIM","RTRIM","REPLACE","TRANSLATE","TO_CHAR","TO_DATE","TO_NUMBER","TO_CLOB","ROUND","TRUNC","MOD","ABS","CEIL","FLOOR","DECODE","GREATEST","LEAST","ADD_MONTHS","STANDARD_HASH");
  private static final Set<String> FORBIDDEN=Set.of("SELECT","INSERT","UPDATE","DELETE","MERGE","DROP","ALTER","CREATE","COMMIT","ROLLBACK","EXECUTE","GRANT","REVOKE","UNION","CONNECT","PRIOR","NEXTVAL","CURRVAL");
  private OracleImportedExpression() { }
  public static String validate(String expression) {

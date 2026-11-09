@@ -9,12 +9,17 @@ import java.util.concurrent.TimeUnit;
 final class Lot2RecoverySmokeCheck {
     volatile String status="RUNNING",identity="attempt-1";
     volatile boolean disconnected;
+    int timeoutForm;
     final java.util.concurrent.atomic.AtomicInteger queryTimeouts=new java.util.concurrent.atomic.AtomicInteger();
     final java.util.concurrent.atomic.AtomicInteger busyLocks=new java.util.concurrent.atomic.AtomicInteger();
     final CountDownLatch busyObserved=new CountDownLatch(1);
     final CountDownLatch timeoutObserved=new CountDownLatch(1);
     final CountDownLatch cancelled=new CountDownLatch(1);
     static void verify() throws Exception {
+        var timeoutClassifier=JobExecutionControl.class.getDeclaredMethod("isQueryTimeout",Throwable.class);timeoutClassifier.setAccessible(true);
+        require(!(boolean)timeoutClassifier.invoke(null,new SQLException("ORA-00604: ORA-00942: table not found","60000",604)),"unrelated recursive SQL errors must remain fatal");
+        SQLException chain=new SQLException("recursive SQL","60000",604);chain.setNextException(new SQLException("cancel","72000",1013));
+        require((boolean)timeoutClassifier.invoke(null,chain),"nested JDBC cancellation must be recognized");
         require(!ChunkRecoveryState.resolved("FAILED",null,false),"manually changed FAILED without evidence remains uncertain");
         require(ChunkRecoveryState.resolved("FAILED","ORA-01013",true),"confirmed failed chunks remain retryable");
         require(ChunkRecoveryState.resolved("SUCCEEDED",null,true),"successful checkpoints remain preserved");
@@ -41,14 +46,15 @@ final class Lot2RecoverySmokeCheck {
                 control.untrack(statement);
             }
         }
-        for(int failures:new int[]{1,3}) {
+        for(int form=0;form<4;form++) for(int failures:new int[]{1,3}) {
             Lot2RecoverySmokeCheck timed=new Lot2RecoverySmokeCheck();
+            timed.timeoutForm=form;
             try(JobExecutionControl control=new JobExecutionControl(950+failures,timed.connection(),timed::connection,null)) {
                 Statement tracked=(Statement)Proxy.newProxyInstance(Statement.class.getClassLoader(),new Class<?>[]{Statement.class},(p,m,a)->{if(m.getName().equals("cancel"))timed.cancelled.countDown();return value(m.getReturnType());});
                 control.track(tracked);timed.queryTimeouts.set(failures);
                 require(timed.timeoutObserved.await(3,TimeUnit.SECONDS),"monitor timeout must be injected");
                 if(failures==1){Thread.sleep(900);control.check();control.beforeCommit(timed.connection());require(timed.cancelled.getCount()==1,"one polling timeout must not cancel target SQL");}
-                else{require(timed.cancelled.await(4,TimeUnit.SECONDS),"repeated polling timeouts must stop target SQL");try{control.check();throw new AssertionError("Persistent timeout accepted");}catch(IllegalStateException expected){require(expected.getMessage().contains("SQL code=1013")&&expected.getMessage().contains("injected monitor timeout"),"SQL cause must survive into the Job error");}}
+                else{require(timed.cancelled.await(8,TimeUnit.SECONDS),"repeated polling timeouts must stop target SQL");try{control.check();throw new AssertionError("Persistent timeout accepted");}catch(IllegalStateException expected){require(expected.getMessage().contains("SQL code="+(form==0?1013:604))&&expected.getMessage().contains("injected monitor timeout"),"SQL cause must survive into the Job error");}}
                 control.untrack(tracked);
             }
         }
@@ -74,9 +80,17 @@ final class Lot2RecoverySmokeCheck {
     });}
     PreparedStatement statement(String sql){return (PreparedStatement)Proxy.newProxyInstance(PreparedStatement.class.getClassLoader(),new Class<?>[]{PreparedStatement.class},(p,m,a)->{
         if(m.getName().equals("executeQuery")) {
-            if(disconnected)throw new SQLException("Injected control connection outage");
+            if(disconnected)throw new SQLException("ORA-00604: injected non-timeout control failure","60000",604);
             if(sql.contains("FOR UPDATE NOWAIT")&&busyLocks.getAndUpdate(n->Math.max(0,n-1))>0){busyObserved.countDown();throw new SQLException("Resource busy", "61000",54);}
-            if(queryTimeouts.getAndUpdate(n->Math.max(0,n-1))>0){timeoutObserved.countDown();throw new SQLTimeoutException("injected monitor timeout", "HYT00",1013);}
+            if(queryTimeouts.getAndUpdate(n->Math.max(0,n-1))>0){
+                timeoutObserved.countDown();
+                if(timeoutForm==0)throw new SQLTimeoutException("injected monitor timeout", "HYT00",1013);
+                SQLException wrapper=new SQLException("ORA-00604: injected monitor timeout"+(timeoutForm==1?"\nORA-01013: user requested cancel of current operation":""),"60000",604);
+                SQLException timeout=new SQLException("injected monitor timeout","72000",1013);
+                if(timeoutForm==2)wrapper.setNextException(timeout);
+                if(timeoutForm==3)wrapper.initCause(timeout);
+                throw wrapper;
+            }
             boolean[] seen={false};String s=status,i=identity;
             return Proxy.newProxyInstance(ResultSet.class.getClassLoader(),new Class<?>[]{ResultSet.class},(r,n,b)->switch(n.getName()){
                 case "next" -> {boolean first=!seen[0];seen[0]=true;yield first;}

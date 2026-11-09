@@ -260,6 +260,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
             if (cancellationRequested.get()) {
                 throw new JobExecutionCancelledException(plan.jobId().value(), error);
             }
+            if(executionControl!=null)executionControl.check();
             throw new IllegalStateException("Unable to prepare parallel execution: "
                     + error.getMessage(), error);
         }

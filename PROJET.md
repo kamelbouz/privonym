@@ -1,6 +1,6 @@
 # Projet Privonym
 
-Import Oracle fidèle : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
+Import SQL fidèle (Oracle, SQL Server, PostgreSQL) : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
 
 Lot 3 — référentiel et reproductibilité : [LOT3_REFERENTIEL.md](LOT3_REFERENTIEL.md).
 

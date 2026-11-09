@@ -1,6 +1,13 @@
 # Corrections du 24 octobre 2026
 
-Import Oracle fidèle : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
+Import SQL fidèle (Oracle, SQL Server, PostgreSQL) : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
+
+Le Transformer conserve désormais aussi les fonctions scalaires SQL Server et
+PostgreSQL dans des expressions exactes propres à chaque dialecte. La migration
+additive V2_027 ajoute les deux modes au catalogue. Le registre Oracle est élargi.
+L'analyse et la génération contrôlent toutes deux le moteur et l'expression ;
+une fonction inconnue reste à examiner. Les règles existantes ne sont pas
+converties automatiquement.
 
 L'import reconnaît également `CONCAT('préfixe',ID_USER)` comme expression
 Oracle exacte. Les préfixes et les dépendances à une autre colonne sont

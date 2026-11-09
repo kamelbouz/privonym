@@ -1,6 +1,6 @@
 # Privonym
 
-Import Oracle fidèle : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
+Import SQL fidèle (Oracle, SQL Server, PostgreSQL) : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
 
 Reprise vérifiée sans intervention SQL : [REPRISE_ORACLE.md](REPRISE_ORACLE.md).
 

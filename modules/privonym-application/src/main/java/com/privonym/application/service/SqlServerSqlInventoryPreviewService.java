@@ -312,7 +312,15 @@ public final class SqlServerSqlInventoryPreviewService implements SqlDialectPars
             }
             String column = unquote(assignment.group(1));
             String expression = assignment.group(2).trim();
-            Match match = matchAlgorithm(column, expression);
+            Match match;
+            if(expression.equalsIgnoreCase("NULL"))match=matched("NULLIFY");
+            else try {
+                ImportedSqlExpression.validate("SQLSERVER",expression);
+                match=matched(ImportedSqlExpression.algorithm("SQLSERVER"),Map.of("expression",expression));
+            } catch(IllegalArgumentException unsupported) {
+                match=new Match("UNRESOLVED",Map.of(),"UNRESOLVED");
+                warnings.add("Statement "+number+": expression retained for review: "+unsupported.getMessage());
+            }
             String status = forceReview && !"UNRESOLVED".equals(match.status())
                     ? "REVIEW_REQUIRED" : match.status();
             if ("UNRESOLVED".equals(status)) warnings.add("Statement " + number

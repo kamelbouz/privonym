@@ -64,6 +64,7 @@ public final class ApplicationSmokeCheck {
         verifiesValidationAndReport();
         verifiesOracleSqlInventoryPreview();
         ExactOracleImportSmokeCheck.verify();
+        NativeSqlImportSmokeCheck.verify();
         verifiesSqlServerSqlInventoryPreview();
         verifiesPostgresqlSqlInventoryPreview();
         verifiesMultiDialectTransformerFoundation();
@@ -268,8 +269,7 @@ public final class ApplicationSmokeCheck {
                 "bracketed SQL Server table");
         assertEquals("NULLIFY", direct.tables().get(0).columns().get(0).algorithmCode(),
                 "T-SQL NULL algorithm");
-        assertEquals("HASH_SHA256", direct.tables().get(0).columns().get(1).algorithmCode(),
-                "T-SQL HASHBYTES algorithm");
+        assertEquals("SQLSERVER_EXPRESSION_EXACT", direct.tables().get(0).columns().get(1).algorithmCode(), "T-SQL HASHBYTES algorithm");
         assertEquals("[ACTIVE] = 1", direct.tables().get(0).filterExpression(),
                 "T-SQL WHERE criterion");
 
@@ -342,8 +342,7 @@ public final class ApplicationSmokeCheck {
                 "PostgreSQL unquoted table is folded to lower case");
         assertEquals("NULLIFY", direct.tables().get(0).columns().get(0).algorithmCode(),
                 "PostgreSQL NULL algorithm");
-        assertEquals("HASH_SHA256", direct.tables().get(0).columns().get(1).algorithmCode(),
-                "PostgreSQL digest algorithm");
+        assertEquals("POSTGRESQL_EXPRESSION_EXACT", direct.tables().get(0).columns().get(1).algorithmCode(), "PostgreSQL digest algorithm");
         assertEquals("active IS TRUE", direct.tables().get(0).filterExpression(),
                 "PostgreSQL RETURNING is excluded from the criterion");
 
@@ -356,7 +355,7 @@ public final class ApplicationSmokeCheck {
 
         SqlInventoryPreview dollarLiteral = parser.parse(
                 "UPDATE public.customer SET note = $mask$masked;value$mask$;");
-        assertEquals("MASK_STRING", dollarLiteral.tables().get(0).columns().get(0).algorithmCode(),
+        assertEquals("POSTGRESQL_EXPRESSION_EXACT", dollarLiteral.tables().get(0).columns().get(0).algorithmCode(),
                 "PostgreSQL dollar-quoted string stays one assignment");
 
         SqlInventoryPreview joined = parser.parse("""

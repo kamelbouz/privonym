@@ -133,10 +133,7 @@ public final class PostgresqlSqlInventoryPreviewService implements SqlDialectPar
             } else if (before.endsWith("DO") || before.endsWith("AS")) {
                 result.append(' ').append(content).append(' ');
             } else {
-                // A dollar-quoted value outside a procedural body is a PostgreSQL
-                // string literal. Converting it to an equivalent single-quoted
-                // literal keeps semicolons inside the value invisible to splitting.
-                result.append('\'').append(content.replace("'", "''")).append('\'');
+                result.append(tag).append(content).append(tag);
             }
             index = close + tag.length();
         }
@@ -326,7 +323,15 @@ public final class PostgresqlSqlInventoryPreviewService implements SqlDialectPar
             }
             String column = unquote(assignment.group(1));
             String expression = assignment.group(2).trim();
-            Match match = matchAlgorithm(column, expression);
+            Match match;
+            if(expression.equalsIgnoreCase("NULL"))match=matched("NULLIFY");
+            else try {
+                ImportedSqlExpression.validate("POSTGRESQL",expression);
+                match=matched(ImportedSqlExpression.algorithm("POSTGRESQL"),Map.of("expression",expression));
+            } catch(IllegalArgumentException unsupported) {
+                match=new Match("UNRESOLVED",Map.of(),"UNRESOLVED");
+                warnings.add("Statement "+number+": expression retained for review: "+unsupported.getMessage());
+            }
             String status = forceReview && !"UNRESOLVED".equals(match.status())
                     ? "REVIEW_REQUIRED" : match.status();
             if ("UNRESOLVED".equals(status)) warnings.add("Statement " + number
@@ -473,6 +478,17 @@ public final class PostgresqlSqlInventoryPreviewService implements SqlDialectPar
         boolean identifierQuoted = false;
         for (int index = 0; index < sql.length(); index++) {
             char current = sql.charAt(index);
+            if (!quoted && !identifierQuoted && current == '$') {
+                Matcher delimiter=Pattern.compile("\\$[A-Za-z0-9_]*\\$").matcher(sql.substring(index));
+                if(delimiter.lookingAt()) {
+                    String tag=delimiter.group();int close=sql.indexOf(tag,index+tag.length());
+                    if(close<0)throw new IllegalArgumentException("Unclosed dollar-quoted SQL text");
+                    String body=sql.substring(index+tag.length(),close);
+                    boolean procedural=result.toString().stripTrailing().matches("(?is).*\\b(?:DO|AS)$");
+                    result.append(tag).append(procedural?stripComments(body):body).append(tag);
+                    index=close+tag.length()-1;continue;
+                }
+            }
             if (!quoted && !identifierQuoted && current == '-' && index + 1 < sql.length()
                     && sql.charAt(index + 1) == '-') {
                 while (index < sql.length() && sql.charAt(index) != '\n') index++;
@@ -662,6 +678,14 @@ public final class PostgresqlSqlInventoryPreviewService implements SqlDialectPar
                     identifierQuoted = false;
                 }
                 return index;
+            }
+            if(current=='$') {
+                Matcher delimiter=Pattern.compile("\\$[A-Za-z0-9_]*\\$").matcher(text.substring(index));
+                if(delimiter.lookingAt()) {
+                    String tag=delimiter.group();int close=text.indexOf(tag,index+tag.length());
+                    if(close<0)throw new IllegalArgumentException("Unclosed dollar-quoted SQL text");
+                    return close+tag.length()-1;
+                }
             }
             if (current == '\'') quoted = true;
             else if (current == '"') identifierQuoted = true;

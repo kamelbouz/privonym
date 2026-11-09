@@ -520,9 +520,9 @@ public final class OracleJobPlanRepository {
 
         private OracleMaskingAssignment freeze(Connection connection, String technologyCode)
                 throws SQLException {
-            boolean exact=com.privonym.application.service.OracleImportedExpression.ALGORITHM.equals(algorithmCode);
+            boolean exact=com.privonym.application.service.ImportedSqlExpression.isExact(algorithmCode);
             String effectiveTemplate = template;
-            if(exact){if(!"ORACLE".equals(technologyCode))throw new OracleTemplateException("Imported Oracle expression cannot execute on another engine");effectiveTemplate=com.privonym.application.service.OracleImportedExpression.validate(values.get("expression"));}
+            if(exact){effectiveTemplate=com.privonym.application.service.ImportedSqlExpression.validateAlgorithm(algorithmCode,technologyCode,values.get("expression"));}
             List<String> effectiveLookupValues = List.of();
             if ("LOOKUP_MAPPING".equals(implementationType)) {
                 if (lookupDatasetId == null) {

@@ -20,6 +20,14 @@ final class RepositoryBaselineSmokeCheck {
   try{Files.writeString(modified,Files.readString(asset)+"\n-- changed asset");boolean rejected=false;try{ExactOracleImportCatalogInstaller.verifyAsset(modified);}catch(IllegalArgumentException expected){rejected=true;}if(!rejected)throw new AssertionError("Changed catalog migration must not be activated during a running Job");}
   finally{Files.deleteIfExists(modified);Files.deleteIfExists(temporary);}
   System.out.println("Exact import catalog asset passed: sealed migration accepted; modified asset rejected before connection/mutation.");
+  Path nativeAsset=directory.resolve("V2_027_native_sql_import_oracle.sql");
+  NativeSqlImportCatalogInstaller.verifyAsset(nativeAsset);
+  Path nativeDirectory=Files.createTempDirectory("privonym-native-asset-");Path changed=nativeDirectory.resolve(nativeAsset.getFileName());
+  try {
+   Files.writeString(changed,Files.readString(nativeAsset)+"\n-- modified");
+   boolean rejected=false;try{NativeSqlImportCatalogInstaller.verifyAsset(changed);}catch(IllegalArgumentException expected){rejected=true;}
+   if(!rejected)throw new AssertionError("Changed native catalog asset must be rejected");
+  }finally{Files.deleteIfExists(changed);Files.deleteIfExists(nativeDirectory);}
  }
 
 }

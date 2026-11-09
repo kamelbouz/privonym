@@ -246,7 +246,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
                 Map<Integer, SuccessfulChunk> completed = successfulChunks(repository,
                         step.jobStepId());
                 TargetRowCountEvidence.capture(repository,target,step.jobStepId(),operation.table(),operation.type(),
-                        expected,findTopLevelWhere(step.generatedCode(),operation.targetEnd())>=0,!completed.isEmpty());
+                        expected,findTopLevelWhere(step.generatedCode(),operation.targetEnd())>=0,!completed.isEmpty(),this::executeTrackedQuery);
                 saveMetric(repository, step.jobStepId(), "EXECUTION_CHUNKED", chunked?1:0, "BOOLEAN");
                 saveMetric(repository, step.jobStepId(), "ROWS_EXPECTED", expected, "ROWS");
                 long chunks = chunked ? Math.max(1L, (expected + chunkSize - 1L) / chunkSize) : 1L;
@@ -677,15 +677,13 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
 
     private ResultSet executeTrackedQuery(PreparedStatement statement) throws SQLException {
         statement.setQueryTimeout(queryTimeoutSeconds());
-        activeStatements.add(statement);
-        try {
-            if(executionControl!=null)executionControl.track(statement);
-            checkCancellation();
-            return statement.executeQuery();
-        } finally {
-            if(executionControl!=null)executionControl.untrack(statement);
-            activeStatements.remove(statement);
-        }
+        return CancellableQueries.execute(statement, tracked -> {
+            activeStatements.add(tracked);
+            if(executionControl!=null)executionControl.track(tracked);
+        }, tracked -> {
+            if(executionControl!=null)executionControl.untrack(tracked);
+            activeStatements.remove(tracked);
+        }, this::checkCancellation);
     }
 
     private int executeTrackedUpdate(PreparedStatement statement) throws SQLException {

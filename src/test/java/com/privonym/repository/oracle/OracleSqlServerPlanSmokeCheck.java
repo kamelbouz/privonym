@@ -9,6 +9,7 @@ public final class OracleSqlServerPlanSmokeCheck {
     public static void main(String[] args) throws Exception {
         OracleFilteredPlanSmokeCheck.verify();
         PortableChunkSmokeCheck.verify();
+        CancellableQueriesSmokeCheck.verify();
         AuditRemediationSmokeCheck.verify();
         Lot3StartupSmokeCheck.verify();
         Lot2RecoverySmokeCheck.verify();

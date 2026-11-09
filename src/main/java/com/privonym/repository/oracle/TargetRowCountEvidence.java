@@ -9,9 +9,19 @@ import java.sql.SQLException;
 final class TargetRowCountEvidence {
     static final String METRIC="TARGET_ROWS_EXPECTED";
     private TargetRowCountEvidence() { }
+    @FunctionalInterface
+    interface QueryRunner {
+        ResultSet execute(PreparedStatement statement) throws SQLException;
+    }
 
     static void capture(Connection repository,Connection target,long stepId,String table,
             String operation,long affectedExpected,boolean filtered,boolean hasCommittedChunks)throws SQLException {
+        capture(repository,target,stepId,table,operation,affectedExpected,filtered,hasCommittedChunks,
+                PreparedStatement::executeQuery);
+    }
+    static void capture(Connection repository,Connection target,long stepId,String table,
+            String operation,long affectedExpected,boolean filtered,boolean hasCommittedChunks,
+            QueryRunner queries)throws SQLException {
         if(hasCommittedChunks)return;
         long expectedAfter;
         if(operation.equals("TRUNCATE"))expectedAfter=0;
@@ -19,7 +29,7 @@ final class TargetRowCountEvidence {
             long before=affectedExpected;
             if(filtered) {
                 try(PreparedStatement query=target.prepareStatement("SELECT COUNT(*) FROM "+table);
-                        ResultSet rows=query.executeQuery()) {
+                        ResultSet rows=queries.execute(query)) {
                     if(!rows.next())throw new SQLException("Missing target population count");before=rows.getLong(1);
                 }
             }

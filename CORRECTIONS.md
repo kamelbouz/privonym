@@ -2,6 +2,18 @@
 
 Import Oracle fidèle : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
 
+## Annulation des comptages de préparation — 9 novembre 2026
+
+Le mode parallèle conserve désormais les requêtes JDBC dans le contrôle
+d'annulation jusqu'à la fermeture du résultat, y compris pendant `ResultSet.next()`.
+Le comptage supplémentaire de population d'une règle filtrée passe également par
+ce contrôle. Le comptage exact peut précéder la création du premier chunk ; sa
+présence dans SQL Server ne signifie donc pas qu'un chunk existe déjà.
+Un test reproduit une lecture différée bloquée, puis vérifie son interruption et
+la libération du suivi. Cette correction ne réconcilie pas automatiquement les
+anciennes exécutions abandonnées et ne transforme pas un heartbeat ancien en
+preuve de rollback.
+
 Reprise vérifiée sans intervention SQL : [REPRISE_ORACLE.md](REPRISE_ORACLE.md).
 
 Lot 3 — référentiel et reproductibilité : [LOT3_REFERENTIEL.md](LOT3_REFERENTIEL.md).

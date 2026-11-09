@@ -1,5 +1,7 @@
 # Projet Privonym
 
+Import Oracle fidèle : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
+
 Lot 3 — référentiel et reproductibilité : [LOT3_REFERENTIEL.md](LOT3_REFERENTIEL.md).
 
 État de référence : code importé en version 2.5.0, commit `04825f7` du

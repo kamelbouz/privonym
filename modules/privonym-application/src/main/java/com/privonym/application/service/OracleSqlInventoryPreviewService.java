@@ -58,9 +58,11 @@ public final class OracleSqlInventoryPreviewService
 
         List<SqlInventoryTable> entries = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
-        ScriptSegments script = segmentScript(stripComments(sql), warnings);
+        ScriptSegments script = segmentScript(stripDirectives(stripComments(sql),warnings), warnings);
         for (ScriptStatement item : script.statements()) {
             String statement = item.sql();
+            if(statement.stripLeading().matches("(?is)^(ALTER|DROP|CREATE)\\b.*")){warnings.add("[UNSUPPORTED] Statement "+item.number()+": business DDL cannot be discarded or executed as a masking rule: "+statement.strip().split("\\s+",3)[0]);continue;}
+            if(statement.stripLeading().matches("(?is)^SELECT\\b.*")){warnings.add("[IGNORED] Statement "+item.number()+": reporting SELECT not imported as a masking rule");continue;}
             if (parseUpdate(statement, item.number(), entries, warnings)) continue;
             if (parseMerge(statement, item.number(), entries, warnings)) continue;
             if (parseDelete(statement, item.number(), entries, warnings)) continue;
@@ -84,37 +86,66 @@ public final class OracleSqlInventoryPreviewService
         List<String> fragments = splitTopLevel(sql.replaceAll("(?m)^\\s*/\\s*$", " "), ';');
         List<ScriptStatement> statements = new ArrayList<>();
         Map<String, String> variables = new LinkedHashMap<>();
+        List<String> parallelCandidates=new ArrayList<>();
+        boolean conditionalParallel=false;
         int sourceNumber = 0;
         for (String raw : fragments) {
             String fragment = raw.trim();
             if (fragment.isEmpty()) continue;
             sourceNumber++;
+            if(fragment.matches("(?is)(COMMIT|ROLLBACK)\\s*")){warnings.add("[IGNORED] Transaction directive: "+fragment);continue;}
+            if(fragment.matches("(?is)^(ALTER|DROP|CREATE)\\b.*")){statements.add(new ScriptStatement(sourceNumber,fragment));continue;}
+            if(fragment.stripLeading().toUpperCase(Locale.ROOT).startsWith("EXCEPTION")){warnings.add("[UNSUPPORTED] Exception handling affects execution semantics and requires review");continue;}
+            List<String> fragmentTokens=OracleImportedExpression.tokens(fragment);
+            if(fragmentTokens.contains("IF")&&!fragmentTokens.get(0).equals("END"))conditionalParallel=true;
+            if(fragment.matches("(?is)(?:DECLARE\\s+)?[A-Za-z][A-Za-z0-9_$#]*\\s+(?:VARCHAR2|NUMBER|PLS_INTEGER|INTEGER)(?:\\s*\\([^)]*\\))?\\s*(?::=.*)?")||fragment.matches("(?is)SELECT\\s+TRUNC\\s*\\(\\s*COUNT\\s*\\(\\s*\\*\\s*\\).*\\bINTO\\b.*")) {
+                warnings.add("[IGNORED] PL/SQL declaration or chunk-size calculation");
+                DynamicAssignment declaration=dynamicAssignment(fragment);if(declaration!=null){String value=evaluateDynamicExpression(declaration.expression(),variables);if(value!=null)variables.put(declaration.variable(),value);}continue;
+            }
+            Matcher run=Pattern.compile("(?is)\\bDBMS_PARALLEL_EXECUTE\\.RUN_TASK\\s*\\(.*?\\bsql_stmt\\s*=>\\s*([A-Za-z][A-Za-z0-9_$#]*)").matcher(fragment);
+            if(run.find()&&fragmentTokens.contains("DBMS_PARALLEL_EXECUTE")) {
+                String value=variables.get(run.group(1).toUpperCase(Locale.ROOT));
+                if(value==null)throw new IllegalArgumentException("Parallel SQL variable cannot be reconstructed; import rejected");
+                value=parallelBusinessSql(value);parallelCandidates.add(value);statements.add(new ScriptStatement(sourceNumber,value));
+                warnings.add("[INFO] Statement "+sourceNumber+": DBMS_PARALLEL_EXECUTE orchestration ignored; business UPDATE extracted");continue;
+            }
+            if(fragmentTokens.contains("DBMS_PARALLEL_EXECUTE")&&!Set.of("UPDATE","DELETE","MERGE","TRUNCATE").contains(fragmentTokens.get(0))) {warnings.add("[INFO] Statement "+sourceNumber+": parallel task/chunk/retry orchestration ignored");continue;}
             DynamicAssignment assignment = dynamicAssignment(fragment);
             if (assignment != null) {
                 String value = evaluateDynamicExpression(assignment.expression(), variables);
                 if (value == null) {
                     variables.remove(assignment.variable());
-                    warnings.add("Statement " + sourceNumber + ": value of dynamic SQL variable "
-                            + assignment.variable() + " could not be reconstructed");
+                    warnings.add("[INFO] Statement " + sourceNumber + ": PL/SQL variable ignored because its scalar value was not statically reconstructed: "
+                            + assignment.variable() + "");
                 } else {
                     variables.put(assignment.variable(), value);
+                    warnings.add("[INFO] Statement "+sourceNumber+": PL/SQL variable evaluated for static SQL reconstruction, not imported as a rule");
                 }
                 continue;
             }
             if (containsExecuteImmediate(fragment)) {
+                int execute=findKeywordOutsideLiterals(fragment,"EXECUTE");
+                if(execute>0&&OracleImportedExpression.tokens(fragment.substring(0,execute)).stream().anyMatch(t->Set.of("IF","LOOP","WHILE","FOR").contains(t))){warnings.add("[UNSUPPORTED] Conditional or repeated dynamic SQL requires preserving its control flow");continue;}
                 String dynamic = resolveExecuteImmediate(fragment, variables);
                 if (dynamic == null) {
                     warnings.add("Statement " + sourceNumber
                             + ": dynamic EXECUTE IMMEDIATE depends on runtime values and requires review");
                 } else {
-                    if (dynamic.contains("&schema..")) warnings.add("Statement " + sourceNumber
+                    if (dynamic.contains("&schema..")) warnings.add("[INFO] Statement " + sourceNumber
                             + ": runtime schema variable was bound to the selected connection schema");
-                    statements.add(new ScriptStatement(sourceNumber, dynamic));
+                    if(fragment.stripLeading().toUpperCase(Locale.ROOT).startsWith("ELSE")&&!parallelCandidates.isEmpty()) {
+                        String business=parallelBusinessSql(dynamic);
+                        var tokens=OracleImportedExpression.tokens(business);
+                        int same=-1;for(int i=0;i<parallelCandidates.size();i++)if(OracleImportedExpression.tokens(parallelCandidates.get(i)).equals(tokens)){same=i;break;}
+                        if(same<0)throw new IllegalArgumentException("DIRECT and parallel branches differ; schema-dependent business rules require review");
+                        parallelCandidates.remove(same);warnings.add("[INFO] Statement "+sourceNumber+": equivalent DIRECT/parallel branches consolidated into one business UPDATE");
+                    }else statements.add(new ScriptStatement(sourceNumber, dynamic));
                 }
                 continue;
             }
             int operation = firstOperationKeyword(fragment);
             if (operation >= 0) {
+                if(operation>0&&OracleImportedExpression.tokens(fragment.substring(0,operation)).stream().anyMatch(t->Set.of("IF","LOOP","WHILE","FOR").contains(t))){warnings.add("[UNSUPPORTED] Conditional/repeated business DML requires preserving its control flow");continue;}
                 if (operation > 0) warnings.add("Statement " + sourceNumber
                         + ": procedural wrapper was ignored around the masking operation");
                 statements.add(new ScriptStatement(sourceNumber, fragment.substring(operation).trim()));
@@ -122,12 +153,13 @@ public final class OracleSqlInventoryPreviewService
                 statements.add(new ScriptStatement(sourceNumber, fragment));
             }
         }
+        if(conditionalParallel&&!parallelCandidates.isEmpty())throw new IllegalArgumentException("Schema-dependent parallel branch lacks an equivalent direct branch; import requires review");
         return new ScriptSegments(sourceNumber, statements);
     }
 
     private static DynamicAssignment dynamicAssignment(String fragment) {
         Matcher matcher = Pattern.compile(
-                "(?is)\\b([A-Za-z][A-Za-z0-9_$#]*)\\s*:=\\s*(.+)$").matcher(fragment);
+                "(?is)\\b([A-Za-z][A-Za-z0-9_$#]*)(?:\\s+(?:VARCHAR2|NUMBER|INTEGER|PLS_INTEGER)(?:\\s*\\([^)]*\\))?)?\\s*:=\\s*(.+)$").matcher(fragment);
         if (!matcher.find()) return null;
         return new DynamicAssignment(matcher.group(1).toUpperCase(Locale.ROOT),
                 matcher.group(2).trim());
@@ -170,6 +202,7 @@ public final class OracleSqlInventoryPreviewService
         }
         String reconstructed = value.toString().replaceAll(
                 "\\$\\{PRIVONYM_SCHEMA\\}\\s*\\.\\s*", "&schema..");
+        reconstructed=reconstructed.replaceAll("(&&?[A-Za-z][A-Za-z0-9_$#]*)\\.(?!\\.)","$1..");
         return reconstructed.contains("${") ? null : reconstructed;
     }
 
@@ -326,6 +359,10 @@ public final class OracleSqlInventoryPreviewService
         int where = findTopLevelKeyword(remainder, "WHERE");
         String assignmentsText = where < 0 ? remainder : remainder.substring(0, where);
         String filter = where < 0 ? "" : remainder.substring(where + 5).trim();
+        String prefix=statement.substring(0,update.end());
+        Matcher alias=Pattern.compile("(?is)^\\s*UPDATE\\s+"+Pattern.quote(update.group(1))+"\\s+(?:AS\\s+)?("+IDENTIFIER+")\\s+SET\\s*$").matcher(prefix);
+        if(alias.matches()&&Pattern.compile("(?i)\\b"+Pattern.quote(alias.group(1))+"\\s*\\.").matcher(filter).find())warnings.add("[UNSUPPORTED] Statement "+number+": correlated target alias requires preserving alias scope");
+        if(OracleImportedExpression.tokens(filter).contains("&"))warnings.add("[UNSUPPORTED] Statement "+number+": schema variables in subquery predicates require explicit binding");
         List<SqlInventoryColumn> assignments = new ArrayList<>();
         for (String item : splitTopLevel(assignmentsText, ',')) {
             Matcher assignment = ASSIGNMENT.matcher(item);
@@ -336,6 +373,7 @@ public final class OracleSqlInventoryPreviewService
             String column = unquote(assignment.group(1));
             String expression = assignment.group(2).trim();
             Match match = matchAlgorithm(column, expression);
+            if(!expression.equalsIgnoreCase("NULL"))try{OracleImportedExpression.validate(expression);match=matched(OracleImportedExpression.ALGORITHM,Map.of("expression",expression));}catch(IllegalArgumentException unsupported){match=new Match("UNRESOLVED",Map.of(),"UNRESOLVED");warnings.add("Statement "+number+": expression retained for review: "+unsupported.getMessage());}
             if ("UNRESOLVED".equals(match.status())) {
                 warnings.add("Statement " + number + ": no registered algorithm matched "
                         + display(name) + "." + column);
@@ -609,7 +647,33 @@ public final class OracleSqlInventoryPreviewService
     }
 
     private static String stripComments(String sql) {
-        return sql.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("(?m)--.*$", " ");
+        StringBuilder out=new StringBuilder();boolean literal=false,identifier=false;
+        for(int i=0;i<sql.length();i++) {
+            char c=sql.charAt(i);
+            if(!literal&&!identifier&&i+1<sql.length()&&c=='-'&&sql.charAt(i+1)=='-'){while(i<sql.length()&&sql.charAt(i)!='\n')i++;out.append('\n');continue;}
+            if(!literal&&!identifier&&i+1<sql.length()&&c=='/'&&sql.charAt(i+1)=='*'){int end=sql.indexOf("*/",i+2);if(end<0)throw new IllegalArgumentException("Unclosed SQL comment");i=end+1;out.append(' ');continue;}
+            out.append(c);
+            if(c=='\''&&!identifier){if(literal&&i+1<sql.length()&&sql.charAt(i+1)=='\''){out.append(sql.charAt(++i));}else literal=!literal;}
+            else if(c=='"'&&!literal){if(identifier&&i+1<sql.length()&&sql.charAt(i+1)=='"')out.append(sql.charAt(++i));else identifier=!identifier;}
+        }
+        return out.toString();
+    }
+    private static String stripDirectives(String sql,List<String> warnings) {
+        StringBuilder out=new StringBuilder();boolean literal=false;
+        for(String line:sql.split("\\R",-1)) {
+            if(!literal&&line.strip().matches("(?i)(WHENEVER\\b.*|DEFINE\\b.*|SET\\s+(SERVEROUTPUT|DEFINE|ECHO|FEEDBACK|VERIFY|PAGESIZE|LINESIZE)\\b.*|PROMPT\\b.*|COMMIT\\s*;?|ROLLBACK\\s*;?|/)") ) {
+                warnings.add("[IGNORED] Technical directive: "+line.strip().split("\\s+",2)[0].toUpperCase(Locale.ROOT));out.append('\n');continue;
+            }
+            out.append(line).append('\n');
+            for(int i=0;i<line.length();i++)if(line.charAt(i)=='\''){if(literal&&i+1<line.length()&&line.charAt(i+1)=='\'')i++;else literal=!literal;}
+        }
+        return out.toString();
+    }
+    private static String parallelBusinessSql(String sql) {
+        int where=findTopLevelKeyword(sql,"WHERE");if(where<0)return sql.strip();
+        String filter=sql.substring(where+5).strip();
+        if(filter.matches("(?is)ROWID\\s+BETWEEN\\s+:start_id\\s+AND\\s+:end_id"))return sql.substring(0,where).strip();
+        if(filter.contains(":start_id")||filter.contains(":end_id"))throw new IllegalArgumentException("Cannot separate technical ROWID boundaries from the business predicate");return sql.strip();
     }
 
     private static Name name(String qualified) {

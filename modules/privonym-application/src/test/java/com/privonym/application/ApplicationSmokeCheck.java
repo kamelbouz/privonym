@@ -63,6 +63,7 @@ public final class ApplicationSmokeCheck {
         verifiesCancelledExecution();
         verifiesValidationAndReport();
         verifiesOracleSqlInventoryPreview();
+        ExactOracleImportSmokeCheck.verify();
         verifiesSqlServerSqlInventoryPreview();
         verifiesPostgresqlSqlInventoryPreview();
         verifiesMultiDialectTransformerFoundation();
@@ -83,10 +84,10 @@ public final class ApplicationSmokeCheck {
         assertEquals(2, preview.tables().size(), "detected operation count");
         assertEquals("CUSTOMER", preview.tables().get(0).name(), "detected table");
         assertEquals(2, preview.columnCount(), "detected column rules");
-        assertEquals("MASK_STRING", preview.tables().get(0).columns().get(0).algorithmCode(),
+        assertEquals("ORACLE_EXPRESSION_EXACT", preview.tables().get(0).columns().get(0).algorithmCode(),
                 "detected masking algorithm");
-        assertEquals("X", preview.tables().get(0).columns().get(0).parameters()
-                .get("mask_character"), "detected masking parameter");
+        assertEquals(preview.tables().get(0).columns().get(0).sourceExpression(), preview.tables().get(0).columns().get(0).parameters()
+                .get("expression"), "original scalar expression preserved");
         assertEquals("NULLIFY", preview.tables().get(0).columns().get(1).algorithmCode(),
                 "detected null algorithm");
         assertEquals("TRUNCATE_TABLE", preview.tables().get(1).algorithmCode(),
@@ -95,16 +96,16 @@ public final class ApplicationSmokeCheck {
 
         SqlInventoryPreview literalPreview = new OracleSqlInventoryPreviewService().preview(
                 "ORACLE", "UPDATE APP.CUSTOMER SET FIRST_NAME = 'VALUE', CITY = N'GENEVA', NOTE = 'MASKED';");
-        assertEquals("LOOKUP_FIRST_NAME",
+        assertEquals("ORACLE_EXPRESSION_EXACT",
                 literalPreview.tables().get(0).columns().get(0).algorithmCode(),
                 "literal first-name algorithm suggestion");
-        assertEquals("LOOKUP_CITY",
+        assertEquals("ORACLE_EXPRESSION_EXACT",
                 literalPreview.tables().get(0).columns().get(1).algorithmCode(),
                 "national literal city algorithm suggestion");
-        assertEquals("MASK_STRING",
+        assertEquals("ORACLE_EXPRESSION_EXACT",
                 literalPreview.tables().get(0).columns().get(2).algorithmCode(),
                 "generic literal algorithm suggestion");
-        assertEquals("REVIEW_REQUIRED",
+        assertEquals("MATCHED",
                 literalPreview.tables().get(0).columns().get(0).matchStatus(),
                 "literal suggestions require review");
 
@@ -170,11 +171,11 @@ public final class ApplicationSmokeCheck {
         SqlInventoryPreview plsqlPreview = new OracleSqlInventoryPreviewService().preview(
                 "ORACLE", """
                         BEGIN
-                          IF anonymization_enabled = 1 THEN
+                          BEGIN
                             UPDATE &schema..CUSTOMER
                                SET EMAIL = NULL
                              WHERE STATUS = 'INACTIVE';
-                          END IF;
+                          END;
                           EXECUTE IMMEDIATE 'UPDATE APP.ACCOUNT SET LABEL = NULL';
                           EXECUTE IMMEDIATE runtime_sql;
                         END;

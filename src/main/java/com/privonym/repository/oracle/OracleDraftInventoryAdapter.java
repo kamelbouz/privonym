@@ -46,6 +46,7 @@ public final class OracleDraftInventoryAdapter implements DraftInventoryReposito
     }
     private DraftInventoryResult createInternal(long dataSourceId,String inventoryCode,
             String inventoryName,String sourceSql,SqlInventoryPreview preview,String createdBy,long expectedRulesetId,long expectedOwnerUserId) {
+        if(preview.warnings().stream().anyMatch(w->w.startsWith("[UNSUPPORTED]")))throw new IllegalArgumentException("Import contains unsupported business DDL/control flow or correlated predicates; no partial Rule Set was created. Review the preview report.");
         String reference = "TRANSFORM-" + UUID.randomUUID().toString().replace("-", "")
                 .substring(0, 18).toUpperCase(Locale.ROOT);
         try (Connection connection = open()) {
@@ -59,7 +60,7 @@ public final class OracleDraftInventoryAdapter implements DraftInventoryReposito
 
                 Counters counters = createMappingsAndRules(connection, importId,
                         dataSourceId, source.defaultSchema(), version.id(), preview);
-                int reviewItems = counters.reviewItems() + preview.warnings().size();
+                int reviewItems = counters.reviewItems() + (int)preview.warnings().stream().filter(w->!w.startsWith("[INFO]")&&!w.startsWith("[IGNORED]")).count();
                 String status = reviewItems == 0 ? "DRAFT_CREATED" : "REVIEW_REQUIRED";
                 finishImport(connection, importId, status, counters, reviewItems);
                 connection.commit();

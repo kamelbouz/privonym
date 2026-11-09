@@ -14,4 +14,12 @@ final class RepositoryBaselineSmokeCheck {
   }finally{Files.deleteIfExists(f);}
   System.out.println("Lot 3 baseline checks passed: Windows/Linux line endings accepted; modified SQL rejected.");
  }
+ static void verifyExactImportAsset(Path directory)throws Exception {
+  Path asset=directory.resolve("V2_026_exact_oracle_import_oracle.sql");ExactOracleImportCatalogInstaller.verifyAsset(asset);
+  Path temporary=Files.createTempDirectory("privonym-import-asset-");Path modified=temporary.resolve(asset.getFileName());
+  try{Files.writeString(modified,Files.readString(asset)+"\n-- changed asset");boolean rejected=false;try{ExactOracleImportCatalogInstaller.verifyAsset(modified);}catch(IllegalArgumentException expected){rejected=true;}if(!rejected)throw new AssertionError("Changed catalog migration must not be activated during a running Job");}
+  finally{Files.deleteIfExists(modified);Files.deleteIfExists(temporary);}
+  System.out.println("Exact import catalog asset passed: sealed migration accepted; modified asset rejected before connection/mutation.");
+ }
+
 }

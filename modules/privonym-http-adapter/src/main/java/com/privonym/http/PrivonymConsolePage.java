@@ -825,7 +825,7 @@ final class PrivonymConsolePage {
                 <h1>Transformer</h1><p class="subtitle">Convert an existing masking SQL script into a Privonym inventory.</p>
                 <section class="panel" style="padding-top:20px">
                   <div class="toolbar"><select id="publish-data-source"><option value="">Select connection before analysis…</option></select>
-                    <input id="sql-file" type="file" accept=".sql,text/plain"><button id="choose-sql-file">Import SQL file</button>
+                    <input id="sql-file" type="file" accept=".sql,.bak,text/plain"><button id="choose-sql-file">Import SQL file</button>
                     <button id="use-example">Load example</button><button id="analyze-sql" class="primary" disabled>Analyze Script</button></div>
                   <div class="toolbar"><div id="new-ruleset-fields" hidden>
                     <input id="inventory-name" type="text" maxlength="200" placeholder="New Rule Set name (required)"></div>
@@ -838,9 +838,9 @@ final class PrivonymConsolePage {
                   <div class="grid" style="margin:18px 0"><article class="card"><div class="label">Statements</div><div id="preview-statements" class="metric">0</div></article>
                     <article class="card"><div class="label">Table operations</div><div id="preview-tables" class="metric">0</div></article>
                     <article class="card"><div class="label">Column rules</div><div id="preview-columns" class="metric">0</div></article>
-                    <article class="card"><div class="label">Warnings</div><div id="preview-warnings" class="metric">0</div></article></div>
+                    <article class="card"><div class="label">Report items</div><div id="preview-warnings" class="metric">0</div></article></div>
                   <div id="preview-message" class="empty"></div><div id="preview-results"></div>
-                  <h3 class="section-title">Review warnings</h3><ul id="warning-list" class="hint"></ul>
+                  <h3 class="section-title">Import report</h3><ul id="warning-list" class="hint"></ul>
                   <p id="preview-checksum" class="hint code"></p></section>
                 """;
         String script = """
@@ -879,7 +879,7 @@ final class PrivonymConsolePage {
                       cell(row,table.filterExpression||'ALL ROWS','code');cell(row,Object.entries(column.parameters).map(([key,value])=>key+'='+value).join(', ')||'—');cell(row,column.matchStatus);cell(row,column.sourceExpression,'code');grid.querySelector('tbody').appendChild(row);});results.appendChild(grid);}});
                   const warnings=document.getElementById('warning-list');warnings.replaceChildren();payload.warnings.forEach(value=>{const item=document.createElement('li');item.textContent=value;warnings.appendChild(item);});
                   document.getElementById('preview-message').textContent=payload.tableCount?'Review every algorithm match before creating the draft inventory.':'No masking operation was detected.';
-                  document.getElementById('preview-checksum').textContent='SHA-256: '+payload.checksum;previewPublishable=payload.tableCount>0;analyzedDataSourceId=dataSource.value;updatePublish();}
+                  document.getElementById('preview-checksum').textContent='SHA-256: '+payload.checksum;previewPublishable=payload.tableCount>0&&!payload.warnings.some(w=>w.startsWith('[UNSUPPORTED]'));if(!previewPublishable&&payload.warnings.some(w=>w.startsWith('[UNSUPPORTED]')))document.getElementById('preview-message').textContent='Import blocked: unsupported business operations must be reviewed; no partial Rule Set will be created.';analyzedDataSourceId=dataSource.value;updatePublish();}
                 publish.addEventListener('click',async()=>{if(publish.disabled)return;publish.disabled=true;publish.textContent='Creating draft…';
                   const message=document.getElementById('preview-message');message.classList.remove('error');
                   const query=new URLSearchParams({name:inventoryName.value.trim()});

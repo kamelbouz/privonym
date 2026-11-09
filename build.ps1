@@ -290,25 +290,29 @@ if ($testSources) {
 
 }
 
-& $jarCommandPath --create --file $domainJarPath -C $domainClassesRoot .
-if ($LASTEXITCODE -ne 0) {
-    throw "Domain JAR packaging failed with exit code $LASTEXITCODE"
+function New-VerifiedJar {
+    param([string]$ClassesDirectory, [string]$OutputFile, [string]$ArgumentsName)
+    # Enumerate files once. Explorer/OneDrive may create/delete desktop.ini while
+    # jar recursively walks a synchronized directory, causing a packaging race.
+    $entries = Get-ChildItem -LiteralPath $ClassesDirectory -Recurse -File |
+        Where-Object { $_.Name -ne 'desktop.ini' }
+    $arguments = New-Object 'System.Collections.Generic.List[string]'
+    $portableRoot = $ClassesDirectory.Replace('\', '/')
+    foreach ($entry in $entries) {
+        $relative = $entry.FullName.Substring($ClassesDirectory.Length + 1).Replace('\', '/')
+        $arguments.Add('-C')
+        $arguments.Add('"' + $portableRoot + '"')
+        $arguments.Add('"' + $relative + '"')
+    }
+    $argumentPath = Join-Path $buildRoot $ArgumentsName
+    [IO.File]::WriteAllLines($argumentPath, $arguments, (New-Object Text.UTF8Encoding($false)))
+    & $jarCommandPath --create --file $OutputFile "@$argumentPath"
+    if ($LASTEXITCODE -ne 0) { throw "JAR packaging failed: $OutputFile (exit $LASTEXITCODE)" }
 }
-
-& $jarCommandPath --create --file $applicationJarPath -C $applicationClassesRoot .
-if ($LASTEXITCODE -ne 0) {
-    throw "Application JAR packaging failed with exit code $LASTEXITCODE"
-}
-
-& $jarCommandPath --create --file $jarPath -C $classesRoot .
-if ($LASTEXITCODE -ne 0) {
-    throw "JAR packaging failed with exit code $LASTEXITCODE"
-}
-
-& $jarCommandPath --create --file $httpJarPath -C $httpClassesRoot .
-if ($LASTEXITCODE -ne 0) {
-    throw "HTTP adapter JAR packaging failed with exit code $LASTEXITCODE"
-}
+New-VerifiedJar $domainClassesRoot $domainJarPath 'domain-jar.args'
+New-VerifiedJar $applicationClassesRoot $applicationJarPath 'application-jar.args'
+New-VerifiedJar $classesRoot $jarPath 'oracle-jar.args'
+New-VerifiedJar $httpClassesRoot $httpJarPath 'http-jar.args'
 
 Write-Host "Offline build completed:"
 Write-Host "  $domainJarPath"

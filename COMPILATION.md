@@ -129,3 +129,5 @@ La limite actuelle du contrôle de santé est signalée dans [PROJET.md](PROJET.
   et l'accès au référentiel. Un build réussi n'établit pas ces connexions.
 - Échec de migration : conserver le diagnostic et examiner l'historique de
   migration ; ne pas lancer un reset pour contourner une erreur.
+
+L'empaquetage JAR utilise une liste explicite de fichiers et exclut desktop.ini, afin d'éviter les erreurs intermittentes lorsque Windows/OneDrive crée ou supprime ce fichier pendant un parcours récursif. Les classes et ressources HTTP restent incluses.

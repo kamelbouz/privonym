@@ -36,7 +36,7 @@ Références des familles de fonctions :
 
 Le mode exact accepte un ensemble contrôlé d'expressions scalaires : colonnes, constantes, concaténations, CASE et fonctions Oracle autorisées, notamment SUBSTR, INSTR, NVL, CHR et REGEXP_REPLACE. Les groupes capturés, retours à la ligne et remplacements imbriqués restent dans leur ordre d'origine. Les expressions sont vérifiées lors de l'analyse et à chaque génération de plan ; elles sont limitées à 4000 caractères. Les appels de packages arbitraires, sous-requêtes dans une affectation, commandes SQL, commentaires injectés et marqueurs de templates ne sont pas admis dans ce mode.
 
-Les DDL métier ne sont jamais classés comme simples directives. Une opération ALTER/DROP/CREATE, une condition non représentable ou un prédicat corrélé dont les alias ne sont pas conservés produit un diagnostic UNSUPPORTED. L'import de ce script complet est bloqué avant création d'un Rule Set partiel. Une expression non reconnue reste à examiner ; elle n'est pas remplacée automatiquement par une proposition approximative.
+Les DDL métier ne sont jamais classés comme simples directives. Les `ALTER TABLE ... SET UNUSED` et `ADD` pris en charge sont conservés dans des scripts PRE/POST. Les autres opérations structurelles, les conditions non représentables ou les prédicats corrélés dont les alias ne sont pas conservés produisent un diagnostic UNSUPPORTED. Le script complet reste bloqué avant création d'un Rule Set partiel si l'un de ces éléments subsiste. Une expression non reconnue reste à examiner ; elle n'est pas remplacée automatiquement par une proposition approximative.
 
 Le fichier .bak est accepté comme texte dans le sélecteur Transformer. Les éléments INFO/IGNORED restent visibles dans le compte rendu sans créer artificiellement des erreurs de revue. Les alertes métier restent bloquantes ou à examiner.
 
@@ -44,11 +44,52 @@ Le fichier .bak est accepté comme texte dans le sélecteur Transformer. Les él
 
 - STL_anonymise.sql : 5 tables et 7 règles fidèles. Même dérivation pour les deux colonnes PARTY, filtre CLIENT/BROKER conservé, constantes exactes et chaîne de cinq remplacements SWIFT dans les CLOB.
 - FOREX_anonymise.sql : 2 ALTER TABLE métier. Pas de conversion approximative du DROP/ADD en NULLIFY ; import complet non pris en charge et signalé.
-- SD_POS_anonymise.bak : 24 opérations et 118 affectations identifiées dans le diagnostic. DDL, alias corrélés, variables dans les sous-requêtes et suppression dynamique de tables empêchent un import automatique complet fidèle. Ce fichier n'est pas annoncé comme pris en charge de bout en bout.
+- SD_POS_anonymise.bak : 23 opérations et 117 affectations dans les règles, 2 commandes en PRE (`ADD is_pending_copy` puis son `UPDATE`) et 41 commandes en POST. Les index, alias corrélés, variables dans les sous-requêtes, exceptions et suppression dynamique de tables restent à examiner. Ce fichier n'est pas annoncé comme pris en charge de bout en bout.
 
 Le test Oracle natif exécute le script STL original dans sa branche directe exclusivement sur cinq tables dédiées, puis réinitialise les mêmes données synthétiques et exécute le SQL du Rule Set enregistré/régénéré. La copie en nouveau brouillon v2 et son export SQL sont également vérifiés. Les résultats sont comparés intégralement : rôles inclus et exclus, nulls, textes constants, champs SWIFT préservés et CLOB de plus de 32 Ko. Les métadonnées et le catalogue de test sont annulés et les tables dédiées supprimées. Aucun script fourni n'est exécuté sur des tables métier.
 
-## Installation
+## Scripts Oracle PRE et POST issus d'un import
+
+Les `SELECT` autonomes de mesure de durée sont ignorés et signalés. Une
+sous-requête `SELECT` appartenant à un filtre métier reste dans ce filtre.
+
+Les blocs contigus `ALTER TABLE ... ADD colonne` puis `UPDATE` de cette colonne
+sont conservés ensemble dans le PRE-SCRIPT. L'UPDATE préparatoire ne devient pas
+une règle sur une colonne encore absente du catalogue. Une opération antérieure
+sur la même table ou une dépendance traversant d'autres opérations métier reste
+à examiner : aucun déplacement automatique de ce bloc n'est alors présenté
+comme fidèle. Les `SET UNUSED` et les ajouts de remplacement final sont conservés
+dans le POST-SCRIPT, dans leur ordre d'origine.
+
+La prévisualisation affiche les deux scripts et permet de les télécharger. Le
+SQL source enregistré avec la version sert de provenance ; une copie du
+brouillon ou une version créée depuis Discovery conserve cette provenance. À la
+création d'un Job, les scripts sont copiés dans ses phases PRE et POST avec des
+noms `transformer-pre-v*.sql` et `transformer-post-v*.sql`. Les références SQL*Plus
+au schéma sont liées au schéma de la connexion sans changer les littéraux SQL.
+Un script manuel existant n'est pas écrasé. Les anciens Jobs ne sont pas modifiés.
+Le clonage entre connexions refuse les scripts contenant un propriétaire de
+schéma littéral : leur cible doit d'abord être examinée.
+
+L'export SQL respecte l'ordre PRE, masquage, POST. Les scripts attachés aux Jobs
+s'exécutent uniquement lors de l'exécution du Job, jamais pendant l'analyse ou
+l'import. Une phase terminée possède un reçu et n'est pas rejouée pendant une
+reprise. Une phase commencée sans reçu de fin exige une vérification, car un DDL
+Oracle peut avoir été validé même si la suite du script a échoué. Un redémarrage
+complet du Job peut relancer ses scripts ; les ADD ne sont pas automatiquement
+transformés en commandes idempotentes.
+
+Les scripts PRE/POST générés accompagnent un inventaire contenant des règles de
+masquage ; un fichier ne contenant que du DDL n'est pas converti en Job autonome.
+Cette extraction structurelle concerne Oracle. Elle utilise les tables de
+provenance et de scripts déjà présentes ; aucune nouvelle migration n'est requise.
+
+Qualification : test sur métadonnées synthétiques vérifiant import, attachement
+aux Jobs, liaison du schéma, ordre de l'export, copie en v2 et préservation d'un
+script manuel. Toutes ces métadonnées sont annulées ; aucun DDL n'est exécuté sur
+une base cible par ce test.
+
+## Installation des modes d'expression
 
 La migration additive `V2_027_native_sql_import_oracle.sql` ajoute les deux modes
 SQL Server et PostgreSQL, leurs paramètres et leurs implémentations propres au

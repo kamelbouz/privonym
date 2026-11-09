@@ -735,11 +735,13 @@ public final class OracleRulesetAdministrationAdapter
             }
         }
         if (content == null || content.isBlank()) return;
+        if (!ScriptPhaseJournal.start(repository,jobId,phase)) return;
         try {
             for (String sql : splitSqlScript(content)) {
                 try (Statement statement = target.createStatement()) { statement.execute(sql); }
             }
             target.commit();
+            ScriptPhaseJournal.complete(repository,jobId,phase);
         } catch (SQLException error) {
             target.rollback();
             try (PreparedStatement statement = repository.prepareStatement("""
@@ -1035,6 +1037,7 @@ public final class OracleRulesetAdministrationAdapter
                         statement.executeUpdate();
                     }
                 }
+                ImportedPhaseScripts.copy(connection,sourceVersionId,draftId,createdBy);
                 connection.commit();
                 return loadVersions(connection, rulesetId).stream()
                         .filter(version -> version.id() == draftId).findFirst()
@@ -1235,6 +1238,7 @@ public final class OracleRulesetAdministrationAdapter
                     statement.setLong(4, sourceVersionId);
                     tableRules = statement.executeUpdate();
                 }
+                ImportedPhaseScripts.copy(connection,sourceVersionId,versionId,createdBy);
                 connection.commit();
                 int skipped = sourceColumnRules + sourceTableRules - columnRules - tableRules;
                 return new RulesetCloneResult(rulesetId, versionId, sourceVersionId,
@@ -1425,6 +1429,7 @@ public final class OracleRulesetAdministrationAdapter
             statement.setLong(3, jobId);
             if (statement.executeUpdate() != 1) throw new SQLException("Job was not rebound");
         }
+        ImportedPhaseScripts.attach(connection,jobId,versionId);
     }
 
     private static boolean hasDraft(Connection connection, long rulesetId) throws SQLException {
@@ -1541,6 +1546,7 @@ public final class OracleRulesetAdministrationAdapter
                         jobId = row.getLong(1);
                     }
                 }
+                ImportedPhaseScripts.attach(connection,jobId,versionId);
                 connection.commit();
                 return new JobCreationResult(jobId, reference, "CREATED", versionId);
             } catch (SQLException | RuntimeException error) {
@@ -2095,9 +2101,11 @@ public final class OracleRulesetAdministrationAdapter
                     .append("-- Target technology: ").append(technology).append("\n")
                     .append("-- Generated only; no statement has been executed.\n\n");
             appendDialectPreamble(sql, technology);
+            String pre=ImportedPhaseScripts.boundSource(connection,versionId,"PRE");
+            if(!pre.isBlank())sql.append("-- PRE script from imported version\n").append(pre).append("\n\n");
             Map<Long, ExportLookup> exportLookups = collectExportLookups(plans);
             appendLookupSetup(sql, technology, exportLookups);
-            int statementCount = 0;
+            int statementCount = pre.isBlank()?0:splitSqlScript(pre).size();
             for (RepositoryTablePlan plan : plans) {
                 String statementSql;
                 if (!plan.tableAlgorithmCode().isBlank()) {
@@ -2125,6 +2133,11 @@ public final class OracleRulesetAdministrationAdapter
                 statementCount++;
             }
             appendLookupCleanup(sql, technology, exportLookups);
+            String post=ImportedPhaseScripts.boundSource(connection,versionId,"POST");
+            if(!post.isBlank()) {
+                sql.append("-- POST script from imported version\n").append(post).append("\n\n");
+                statementCount+=splitSqlScript(post).size();
+            }
             appendDialectCommit(sql, technology);
             return new RulesetSqlExport(code, versionNumber, technology,
                     statementCount, sql.toString());

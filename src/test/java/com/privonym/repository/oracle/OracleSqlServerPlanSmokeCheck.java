@@ -11,6 +11,7 @@ public final class OracleSqlServerPlanSmokeCheck {
         PortableChunkSmokeCheck.verify();
         CancellableQueriesSmokeCheck.verify();
         NativeSqlExpressionPlanSmokeCheck.verify();
+        ImportedPhaseScriptsSmokeCheck.verify();
         AuditRemediationSmokeCheck.verify();
         Lot3StartupSmokeCheck.verify();
         Lot2RecoverySmokeCheck.verify();

@@ -1810,7 +1810,8 @@ public final class PrivonymHttpHandler extends Handler.Abstract {
             if (index > 0) json.append(',');
             json.append('"').append(escape(preview.warnings().get(index))).append('"');
         }
-        return json.append("]}").toString();
+        return json.append("],\"preScript\":\"").append(escape(preview.preScript()))
+                .append("\",\"postScript\":\"").append(escape(preview.postScript())).append("\"}").toString();
     }
 
     private static String draftInventoryJson(DraftInventoryResult result) {

@@ -108,6 +108,7 @@ final class DiscoveryDraftWriter {
                 }
             }
         }
+        ImportedPhaseScripts.copy(c,sourceId,draftId,user);
         return new DiscoveryCreationResult(rulesetId,draftId,state.code(),selections.size(),state.nextVersion(),false);
     }
 

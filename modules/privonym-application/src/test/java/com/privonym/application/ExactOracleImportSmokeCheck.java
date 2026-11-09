@@ -18,6 +18,16 @@ final class ExactOracleImportSmokeCheck {
  }
  static void verify() {
   var parser=new OracleSqlInventoryPreviewService();var p=parser.parse(fixture());
+  String post="ALTER TABLE &schema..TBL_CASH_MOVEMENT set unused column DE_MOVEMENT;\n"
+    +"ALTER TABLE &schema..TBL_CASH_MOVEMENT set unused column DE_MOVEMENT_SUPPL;\n"
+    +"ALTER TABLE &schema..TBL_CASH_MOVEMENT ADD (DE_MOVEMENT VARCHAR(255), DE_MOVEMENT_SUPPL VARCHAR(255));";
+  var withPost=parser.parse("SELECT TO_CHAR(SYSDATE,'HH24:MI:SS') FROM dual;\nUPDATE &schema..TBL_CASH_MOVEMENT SET DE_MOVEMENT=NULL;\n"+post);
+  require(withPost.postScript().equals(post),"Structural POST order or SQL changed");
+  require(withPost.columnCount()==1&&withPost.warnings().stream().noneMatch(w->w.startsWith("[UNSUPPORTED]")),"Supported POST/timing statements must not block import");
+  var dependency=parser.parse("ALTER TABLE T ADD COPY_FLAG NUMBER; UPDATE T SET COPY_FLAG=1;");
+  require(dependency.preScript().equals("ALTER TABLE T ADD COPY_FLAG NUMBER;\nUPDATE T SET COPY_FLAG=1;")&&dependency.postScript().isBlank()&&dependency.columnCount()==0,"Dependent ADD and UPDATE must stay together in PRE");
+  var crossed=parser.parse("ALTER TABLE T ADD COPY_FLAG NUMBER; UPDATE X SET C=0; UPDATE T SET COPY_FLAG=1;");
+  require(crossed.warnings().stream().anyMatch(w->w.startsWith("[UNSUPPORTED]")),"Non-local dependencies require review instead of reordering");
   for(String prefix:List.of("COMMON_","FIRST_NAME_","LAST_NAME_","USER_")) {
    String expression="CONCAT('"+prefix+"',ID_USER)";
    var concatenation=parser.parse("UPDATE T SET NM_USER="+expression+";").tables().get(0).columns().get(0);
@@ -38,7 +48,7 @@ final class ExactOracleImportSmokeCheck {
   var unknownParallel=parser.parse("UPDATE T SET C=NULL; BEGIN DBMS_PARALLEL_EXECUTE.run_task('task','UPDATE X SET C=NULL',1,10);END;");require(unknownParallel.warnings().stream().anyMatch(w->w.startsWith("[UNSUPPORTED]")),"Unresolved parallel SQL must block a partial import");
   var unknownDynamic=parser.parse("UPDATE T SET C=NULL; EXECUTE IMMEDIATE runtime_sql;");require(unknownDynamic.warnings().stream().anyMatch(w->w.startsWith("[UNSUPPORTED]")),"Unresolved dynamic SQL must block a partial import");
   var ddl=parser.parse("WHENEVER SQLERROR EXIT SQL.SQLCODE\nALTER TABLE &schema..T DROP COLUMN C; ALTER TABLE &schema..T ADD C VARCHAR2(20);");
-  require(ddl.tables().isEmpty()&&ddl.warnings().stream().filter(w->w.startsWith("[UNSUPPORTED]")).count()==2,"Business DDL must not disappear as a directive");
+  require(ddl.tables().isEmpty()&&ddl.warnings().stream().filter(w->w.startsWith("[UNSUPPORTED]")).count()==1&&ddl.postScript().contains("ADD C VARCHAR2(20)"),"DROP must remain unsupported while ADD is preserved in POST");
   var conditional=parser.parse("BEGIN IF ENABLED=1 THEN UPDATE T SET C=NULL; END IF;END;");require(conditional.warnings().stream().anyMatch(w->w.startsWith("[UNSUPPORTED]")),"Business condition must not be dropped");
   var correlated=parser.parse("UPDATE T x SET C=0 WHERE EXISTS(SELECT 1 FROM P WHERE P.ID=x.ID);");require(correlated.warnings().stream().anyMatch(w->w.startsWith("[UNSUPPORTED]")),"Unsupported alias scope must be explicit");
   boolean different=false;try{parser.parse(wrapper("T","C='ORIGINAL'").replace(".T SET C=''ORIGINAL'''; END IF", ".T SET C=''OTHER'''; END IF"));}catch(IllegalArgumentException expected){different=true;}require(different,"Different branch transformations must not be consolidated");

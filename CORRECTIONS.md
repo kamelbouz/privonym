@@ -2,6 +2,14 @@
 
 Import SQL fidèle (Oracle, SQL Server, PostgreSQL) : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
 
+Import Oracle : les ADD suivis d'un UPDATE dépendant contigu sont conservés
+ensemble en PRE. Les SET UNUSED et ADD de remplacement final sont conservés en
+POST. Les SELECT de mesure sont ignorés. Les phases sont visibles et
+téléchargeables dans Transformer, conservées dans les copies de version,
+attachées aux nouveaux Jobs et incluses dans l'export SQL. Les reçus d'exécution
+évitent de rejouer une phase terminée à la reprise. Le rapport de blocage indique
+désormais le premier motif concret, même lorsque toutes les colonnes sont MATCHED.
+
 Le Transformer conserve désormais aussi les fonctions scalaires SQL Server et
 PostgreSQL dans des expressions exactes propres à chaque dialecte. La migration
 additive V2_027 ajoute les deux modes au catalogue. Le registre Oracle est élargi.

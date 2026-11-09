@@ -58,9 +58,27 @@ public final class OracleSqlInventoryPreviewService
 
         List<SqlInventoryTable> entries = new ArrayList<>();
         List<String> warnings = new ArrayList<>();
+        List<String> post = new ArrayList<>();
+        List<String> pre = new ArrayList<>();
+        Set<String> alteredTables = new HashSet<>();
         ScriptSegments script = segmentScript(stripDirectives(stripComments(sql),warnings), warnings);
+        Set<Integer> preparation=preparationStatements(script.statements(),warnings);
         for (ScriptStatement item : script.statements()) {
             String statement = item.sql();
+            if(preparation.contains(item.number())) {
+                pre.add(statement.strip()+";");
+                warnings.add("[INFO] Statement "+item.number()+": dependent ADD/UPDATE preserved in the generated PRE script");continue;
+            }
+            Matcher postAlter=Pattern.compile("(?is)^\\s*ALTER\\s+TABLE\\s+"+QUALIFIED_NAME+"\\s+(?:SET\\s+UNUSED\\b|ADD\\b).*").matcher(statement);
+            if(postAlter.matches()) {
+                alteredTables.add(String.join(" ",OracleImportedExpression.tokens(postAlter.group(1))));
+                post.add(statement.strip()+";");
+                warnings.add("[INFO] Statement "+item.number()+": ALTER TABLE preserved in the generated POST script");
+                continue;
+            }
+            Matcher laterUpdate=UPDATE.matcher(statement);
+            if(laterUpdate.find()&&alteredTables.contains(String.join(" ",OracleImportedExpression.tokens(laterUpdate.group(1)))))
+                warnings.add("[UNSUPPORTED] Statement "+item.number()+": UPDATE follows ALTER TABLE on the same table; moving that ALTER to POST would change dependency order");
             if(statement.stripLeading().matches("(?is)^(ALTER|DROP|CREATE)\\b.*")){warnings.add("[UNSUPPORTED] Statement "+item.number()+": business DDL cannot be discarded or executed as a masking rule: "+statement.strip().split("\\s+",3)[0]);continue;}
             if(statement.stripLeading().matches("(?is)^SELECT\\b.*")){warnings.add("[IGNORED] Statement "+item.number()+": reporting SELECT not imported as a masking rule");continue;}
             if (parseUpdate(statement, item.number(), entries, warnings)) continue;
@@ -73,7 +91,40 @@ public final class OracleSqlInventoryPreviewService
         List<SqlInventoryTable> applicableEntries = retainApplicableAlgorithms(entries, warnings);
         if (applicableEntries.isEmpty()) warnings.add("No masking operation was detected");
         return new SqlInventoryPreview("ORACLE", sha256(sql), script.sourceStatementCount(),
-                applicableEntries, warnings);
+                applicableEntries, warnings,String.join("\n",pre),String.join("\n",post));
+    }
+
+    private static Set<Integer> preparationStatements(List<ScriptStatement> statements,List<String> warnings) {
+        Set<Integer> pre=new HashSet<>();
+        Pattern add=Pattern.compile("(?is)^\\s*ALTER\\s+TABLE\\s+"+QUALIFIED_NAME+"\\s+ADD\\s+(.+)$");
+        for(int i=0;i<statements.size();i++) {
+            Matcher declaration=add.matcher(statements.get(i).sql());if(!declaration.matches())continue;
+            String table=String.join(" ",OracleImportedExpression.tokens(declaration.group(1)));
+            String body=declaration.group(2).strip();if(body.startsWith("(")&&body.endsWith(")"))body=body.substring(1,body.length()-1);
+            Set<String> columns=new HashSet<>();
+            for(String definition:splitTopLevel(body,',')) {
+                Matcher column=Pattern.compile("^\\s*("+IDENTIFIER+")\\s+.+",Pattern.DOTALL).matcher(definition);
+                if(column.matches())columns.add(column.group(1).replace("\"", "").toUpperCase(Locale.ROOT));
+            }
+            boolean contiguous=true;
+            for(int j=i+1;j<statements.size();j++) {
+                String next=statements.get(j).sql();if(next.stripLeading().matches("(?is)^SELECT\\b.*"))continue;
+                Matcher update=UPDATE.matcher(next);
+                boolean same=update.find()&&String.join(" ",OracleImportedExpression.tokens(update.group(1))).equals(table);
+                boolean dependent=same&&OracleImportedExpression.tokens(next).stream().anyMatch(t->columns.contains(t.replace("\"", "").toUpperCase(Locale.ROOT)));
+                if(!dependent){contiguous=false;continue;}
+                boolean earlierUpdate=false;
+                for(int k=0;k<i;k++){
+                    Matcher before=UPDATE.matcher(statements.get(k).sql());if(before.find()&&String.join(" ",OracleImportedExpression.tokens(before.group(1))).equals(table))earlierUpdate=true;
+                    Matcher structural=Pattern.compile("(?is)^\\s*ALTER\\s+TABLE\\s+"+QUALIFIED_NAME+"\\s+.*").matcher(statements.get(k).sql());
+                    if(structural.matches()&&String.join(" ",OracleImportedExpression.tokens(structural.group(1))).equals(table))earlierUpdate=true;
+                }
+                if(!contiguous||earlierUpdate) {
+                    warnings.add("[UNSUPPORTED] Statement "+statements.get(j).number()+": ADD/UPDATE dependency crosses other business operations and cannot move to PRE independently");
+                } else {pre.add(statements.get(i).number());pre.add(statements.get(j).number());}
+            }
+        }
+        return pre;
     }
 
     /**

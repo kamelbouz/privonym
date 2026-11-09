@@ -26,7 +26,7 @@ public final class ExactOracleImportCatalogInstaller {
   // The sealed asset creates a fresh algorithm/version/parameter/implementation only.
   // It has no DDL, UPDATE, DELETE, COMMIT, or changes to existing Rule Sets/Jobs/lookups.
   OracleRepositoryUpgrader.apply(c,path);
-  try(PreparedStatement q=c.prepareStatement("INSERT INTO privonym_schema_migration(migration_name,checksum_sha256,applied_by) VALUES(?,?,?)")){q.setString(1,NAME);q.setString(2,OracleRepositoryUpgrader.sha256(path));q.setString(3,actor);q.executeUpdate();}
+  try(PreparedStatement q=c.prepareStatement("INSERT INTO privonym_schema_migration(migration_name,checksum_sha256,applied_by) VALUES(?,?,?)")){q.setString(1,NAME);q.setString(2,SHA256);q.setString(3,actor);q.executeUpdate();}
   c.commit();System.out.println("V2_026 installed: new exact-expression catalog entries only; existing Jobs, Rule Sets, lookups and schema unchanged.");
  }
 }

@@ -67,7 +67,7 @@ public final class OracleSqlInventoryPreviewService
             if (parseMerge(statement, item.number(), entries, warnings)) continue;
             if (parseDelete(statement, item.number(), entries, warnings)) continue;
             if (parseTruncate(statement, item.number(), entries)) continue;
-            warnings.add("Statement " + item.number()
+            warnings.add("[UNSUPPORTED] Statement " + item.number()
                     + " is not an UPDATE, MERGE, DELETE or TRUNCATE operation");
         }
         List<SqlInventoryTable> applicableEntries = retainApplicableAlgorithms(entries, warnings);
@@ -109,6 +109,7 @@ public final class OracleSqlInventoryPreviewService
                 value=parallelBusinessSql(value);parallelCandidates.add(value);statements.add(new ScriptStatement(sourceNumber,value));
                 warnings.add("[INFO] Statement "+sourceNumber+": DBMS_PARALLEL_EXECUTE orchestration ignored; business UPDATE extracted");continue;
             }
+            if(fragmentTokens.contains("DBMS_PARALLEL_EXECUTE")&&fragmentTokens.contains("RUN_TASK")&&!Set.of("UPDATE","DELETE","MERGE","TRUNCATE").contains(fragmentTokens.get(0))){warnings.add("[UNSUPPORTED] Parallel SQL argument could not be statically reconstructed");continue;}
             if(fragmentTokens.contains("DBMS_PARALLEL_EXECUTE")&&!Set.of("UPDATE","DELETE","MERGE","TRUNCATE").contains(fragmentTokens.get(0))) {warnings.add("[INFO] Statement "+sourceNumber+": parallel task/chunk/retry orchestration ignored");continue;}
             DynamicAssignment assignment = dynamicAssignment(fragment);
             if (assignment != null) {
@@ -128,7 +129,7 @@ public final class OracleSqlInventoryPreviewService
                 if(execute>0&&OracleImportedExpression.tokens(fragment.substring(0,execute)).stream().anyMatch(t->Set.of("IF","LOOP","WHILE","FOR").contains(t))){warnings.add("[UNSUPPORTED] Conditional or repeated dynamic SQL requires preserving its control flow");continue;}
                 String dynamic = resolveExecuteImmediate(fragment, variables);
                 if (dynamic == null) {
-                    warnings.add("Statement " + sourceNumber
+                    warnings.add("[UNSUPPORTED] Statement " + sourceNumber
                             + ": dynamic EXECUTE IMMEDIATE depends on runtime values and requires review");
                 } else {
                     if (dynamic.contains("&schema..")) warnings.add("[INFO] Statement " + sourceNumber

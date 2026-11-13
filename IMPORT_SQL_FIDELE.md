@@ -6,7 +6,7 @@ L'import conserve les expressions scalaires prises en charge dans le paramètre 
 
 WHENEVER, DEFINE, SET SERVEROUTPUT et autres réglages SQL*Plus reconnus, PROMPT, les COMMIT/ROLLBACK et les séparateurs / ne sont pas des règles. Ils sont signalés dans le compte rendu, sans être exécutés. Les textes identiques présents dans un littéral SQL ne sont pas supprimés. Les commentaires sont reconnus hors des littéraux.
 
-Les références &schema sont rattachées au schéma de la connexion sélectionnée. Les variables de SQL dynamique ne sont reconstruites que si leur valeur est statiquement déterminable. Les appels DBMS_PARALLEL_EXECUTE servent à extraire le SQL métier associé ; création de tâche, calcul des chunks, lancement et reprise restent gérés par Privonym. Une borne technique complète ROWID BETWEEN :start_id AND :end_id est retirée du SQL extrait. Une combinaison ambiguë avec un prédicat métier est refusée.
+Le préfixe &schema.. est retiré des références SQL pour utiliser le schéma courant de la connexion. Les variables de SQL dynamique ne sont reconstruites que si leur valeur est statiquement déterminable. Les appels DBMS_PARALLEL_EXECUTE servent à extraire le SQL métier associé ; création de tâche, calcul des chunks, lancement et reprise restent gérés par Privonym. Une borne technique complète ROWID BETWEEN :start_id AND :end_id est retirée du SQL extrait. Une combinaison ambiguë avec un prédicat métier est refusée.
 
 Les branches directe et parallèle équivalentes sont regroupées en une seule opération métier après comparaison de leurs tokens, en conservant les littéraux. Des branches différentes ne sont pas fusionnées. Les conditions ou boucles métier non représentables sont signalées explicitement, sans extraction silencieuse de leur seul UPDATE.
 
@@ -36,7 +36,7 @@ Références des familles de fonctions :
 
 Le mode exact accepte un ensemble contrôlé d'expressions scalaires : colonnes, constantes, concaténations, CASE et fonctions Oracle autorisées, notamment SUBSTR, INSTR, NVL, CHR et REGEXP_REPLACE. Les groupes capturés, retours à la ligne et remplacements imbriqués restent dans leur ordre d'origine. Les expressions sont vérifiées lors de l'analyse et à chaque génération de plan ; elles sont limitées à 4000 caractères. Les appels de packages arbitraires, sous-requêtes dans une affectation, commandes SQL, commentaires injectés et marqueurs de templates ne sont pas admis dans ce mode.
 
-Les DDL Oracle autonomes reconnus sont conservés en POST par défaut, y compris CREATE INDEX et DROP. Un TRUNCATE qui précède une opération de masquage sur la même table est placé en PRE, comme les blocs ADD et UPDATE dépendants déjà pris en charge. La boucle de suppression TMP du fichier SD_POS est conservée entière en POST. Les définitions PL/SQL stockées et les dépendances ambiguës restent à examiner. Un diagnostic UNSUPPORTED bloque la création du Rule Set.
+Les DDL Oracle autonomes reconnus sont conservés en POST par défaut, y compris CREATE INDEX et DROP. Un ALTER TABLE avant le masquage de la même table est placé en PRE. Un ALTER entre deux opérations de masquage de la même table demande un examen de leur ordre. Un TRUNCATE qui précède une opération de masquage sur la même table est placé en PRE, comme les blocs ADD et UPDATE dépendants déjà pris en charge. La boucle de suppression TMP du fichier SD_POS est conservée entière en POST. Les définitions PL/SQL stockées et les dépendances ambiguës restent à examiner. Un diagnostic UNSUPPORTED bloque la création du Rule Set.
 
 Le fichier .bak est accepté comme texte dans le sélecteur Transformer. Les éléments INFO/IGNORED restent visibles dans le compte rendu sans créer artificiellement des erreurs de revue. Les alertes métier restent bloquantes ou à examiner.
 
@@ -66,7 +66,7 @@ SQL source enregistré avec la version sert de provenance ; une copie du
 brouillon ou une version créée depuis Discovery conserve cette provenance. À la
 création d'un Job, les scripts sont copiés dans ses phases PRE et POST avec des
 noms `transformer-pre-v*.sql` et `transformer-post-v*.sql`. Les références SQL*Plus
-au schéma sont liées au schéma de la connexion sans changer les littéraux SQL.
+&schema.. sont retirées des scripts générés. Les littéraux SQL et les propriétaires explicites sont conservés.
 Un script manuel existant n'est pas écrasé. Les anciens Jobs ne sont pas modifiés.
 Le clonage entre connexions refuse les scripts contenant un propriétaire de
 schéma littéral : leur cible doit d'abord être examinée.

@@ -22,10 +22,14 @@ final class ExactOracleImportSmokeCheck {
     +"ALTER TABLE &schema..TBL_CASH_MOVEMENT set unused column DE_MOVEMENT_SUPPL;\n"
     +"ALTER TABLE &schema..TBL_CASH_MOVEMENT ADD (DE_MOVEMENT VARCHAR(255), DE_MOVEMENT_SUPPL VARCHAR(255));";
   var withPost=parser.parse("SELECT TO_CHAR(SYSDATE,'HH24:MI:SS') FROM dual;\nUPDATE &schema..TBL_CASH_MOVEMENT SET DE_MOVEMENT=NULL;\n"+post);
-  require(withPost.postScript().equals(post),"Structural POST order or SQL changed");
+  require(withPost.postScript().equals(post.replace("&schema..","")),"Structural POST order or SQL changed");
   require(withPost.columnCount()==1&&withPost.warnings().stream().noneMatch(w->w.startsWith("[UNSUPPORTED]")),"Supported POST/timing statements must not block import");
   var dependency=parser.parse("ALTER TABLE T ADD COPY_FLAG NUMBER; UPDATE T SET COPY_FLAG=1;");
   require(dependency.preScript().equals("ALTER TABLE T ADD COPY_FLAG NUMBER;\nUPDATE T SET COPY_FLAG=1;")&&dependency.postScript().isBlank()&&dependency.columnCount()==0,"Dependent ADD and UPDATE must stay together in PRE");
+  var alterBeforeUpdate=parser.parse("ALTER TABLE &Schema..T MODIFY C VARCHAR2(40); UPDATE T SET C=NULL;");
+  require(alterBeforeUpdate.preScript().equals("ALTER TABLE T MODIFY C VARCHAR2(40);")
+      &&alterBeforeUpdate.postScript().isBlank()&&alterBeforeUpdate.columnCount()==1
+      &&alterBeforeUpdate.warnings().stream().noneMatch(w->w.startsWith("[UNSUPPORTED]")),"ALTER before masking belongs in PRE");
   var cleanup=parser.parse("""
       SET SERVEROUTPUT ON SIZE UNLIMITED;
       BEGIN

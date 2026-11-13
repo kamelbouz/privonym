@@ -65,25 +65,35 @@ public final class OracleSqlInventoryPreviewService
         List<String> warnings = new ArrayList<>();
         List<String> post = new ArrayList<>();
         List<String> pre = new ArrayList<>();
-        Set<String> alteredTables = new HashSet<>();
+
         ScriptSegments script = segmentScript(stripDirectives(stripComments(sql),warnings), warnings);
-        Set<Integer> preparation=preparationStatements(script.statements(),warnings);
-        for (ScriptStatement item : script.statements()) {
+        List<ScriptStatement> statements = script.statements().stream()
+                .map(item -> new ScriptStatement(item.number(), stripSchemaPlaceholder(item.sql())))
+                .toList();
+        Set<Integer> preparation=preparationStatements(statements,warnings);
+        Pattern alterTable = Pattern.compile("(?is)^ALTER\\s+TABLE\\s+" + QUALIFIED_NAME + "\\s+.*");
+        for (ScriptStatement item : statements) {
             String statement = item.sql();
             if(preparation.contains(item.number())) {
                 pre.add(statement.strip()+";");
                 warnings.add("[INFO] Statement "+item.number()+": dependent ADD/UPDATE preserved in the generated PRE script");continue;
             }
-            Matcher postAlter=Pattern.compile("(?is)^\\s*ALTER\\s+TABLE\\s+"+QUALIFIED_NAME+"\\s+(?:SET\\s+UNUSED\\b|ADD\\b).*").matcher(statement);
-            if(postAlter.matches()) {
-                alteredTables.add(String.join(" ",OracleImportedExpression.tokens(postAlter.group(1))));
-                post.add(statement.strip()+";");
-                warnings.add("[INFO] Statement "+item.number()+": ALTER TABLE preserved in the generated POST script");
-                continue;
+            Matcher alter = alterTable.matcher(statement);
+            if (alter.matches()) {
+                List<String> target = OracleImportedExpression.tokens(alter.group(1));
+                boolean affectsMasking = statements.stream().anyMatch(next -> next.number() > item.number()
+                        && !preparation.contains(next.number()) && targetsTable(next.sql(), target));
+                if (affectsMasking) {
+                    pre.add(statement.strip() + ";");
+                    warnings.add("[INFO] Statement " + item.number() + ": ALTER TABLE preserved in PRE before masking on the same table");
+                    if (statements.stream().anyMatch(previous -> previous.number() < item.number()
+                            && !preparation.contains(previous.number()) && targetsTable(previous.sql(), target))) {
+                        warnings.add("[UNSUPPORTED] Statement " + item.number()
+                                + ": ALTER TABLE is between masking operations on the same table and requires preserving their order");
+                    }
+                    continue;
+                }
             }
-            Matcher laterUpdate=UPDATE.matcher(statement);
-            if(laterUpdate.find()&&alteredTables.contains(String.join(" ",OracleImportedExpression.tokens(laterUpdate.group(1)))))
-                warnings.add("[UNSUPPORTED] Statement "+item.number()+": UPDATE follows ALTER TABLE on the same table; moving that ALTER to POST would change dependency order");
             if (TABLE_CLEANUP.matcher(statement).matches()) {
                 post.add(statement.strip() + ";\n/");
                 warnings.add("[INFO] Statement " + item.number() + ": table cleanup block preserved in POST");
@@ -92,7 +102,7 @@ public final class OracleSqlInventoryPreviewService
             Matcher truncate = Pattern.compile("(?is)^TRUNCATE\\s+TABLE\\s+" + QUALIFIED_NAME + "(?:\\s+.*)?$").matcher(statement);
             if (truncate.matches()) {
                 List<String> target = OracleImportedExpression.tokens(truncate.group(1));
-                boolean usedLater = script.statements().stream().filter(next -> next.number() > item.number())
+                boolean usedLater = statements.stream().filter(next -> next.number() > item.number())
                         .anyMatch(next -> targetsTable(next.sql(), target));
                 if (usedLater) {
                     pre.add(statement.strip() + ";");
@@ -118,6 +128,33 @@ public final class OracleSqlInventoryPreviewService
                 applicableEntries, warnings,String.join("\n",pre),String.join("\n",post));
     }
 
+    public static String stripSchemaPlaceholder(String sql) {
+        Pattern placeholder = Pattern.compile("(?i)&&?schema\\s*\\.\\s*\\.");
+        Matcher matcher = placeholder.matcher(sql);
+        StringBuilder result = new StringBuilder(sql.length());
+        char quote = 0;
+        for (int index = 0; index < sql.length(); index++) {
+            char current = sql.charAt(index);
+            if (quote != 0) {
+                result.append(current);
+                if (current == quote) {
+                    if (index + 1 < sql.length() && sql.charAt(index + 1) == quote) {
+                        result.append(sql.charAt(++index));
+                    } else {
+                        quote = 0;
+                    }
+                }
+            } else if (current == '\'' || current == '"') {
+                quote = current;
+                result.append(current);
+            } else if (current == '&' && matcher.region(index, sql.length()).lookingAt()) {
+                index = matcher.end() - 1;
+            } else {
+                result.append(current);
+            }
+        }
+        return result.toString();
+    }
     private static boolean targetsTable(String sql, List<String> target) {
         for (Pattern operation : List.of(UPDATE, DELETE, MERGE)) {
             Matcher match = operation.matcher(sql);

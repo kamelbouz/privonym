@@ -36,15 +36,15 @@ Références des familles de fonctions :
 
 Le mode exact accepte un ensemble contrôlé d'expressions scalaires : colonnes, constantes, concaténations, CASE et fonctions Oracle autorisées, notamment SUBSTR, INSTR, NVL, CHR et REGEXP_REPLACE. Les groupes capturés, retours à la ligne et remplacements imbriqués restent dans leur ordre d'origine. Les expressions sont vérifiées lors de l'analyse et à chaque génération de plan ; elles sont limitées à 4000 caractères. Les appels de packages arbitraires, sous-requêtes dans une affectation, commandes SQL, commentaires injectés et marqueurs de templates ne sont pas admis dans ce mode.
 
-Les DDL métier ne sont jamais classés comme simples directives. Les `ALTER TABLE ... SET UNUSED` et `ADD` pris en charge sont conservés dans des scripts PRE/POST. Les autres opérations structurelles, les conditions non représentables ou les prédicats corrélés dont les alias ne sont pas conservés produisent un diagnostic UNSUPPORTED. Le script complet reste bloqué avant création d'un Rule Set partiel si l'un de ces éléments subsiste. Une expression non reconnue reste à examiner ; elle n'est pas remplacée automatiquement par une proposition approximative.
+Les DDL Oracle autonomes reconnus sont conservés en POST par défaut, y compris CREATE INDEX et DROP. Un TRUNCATE qui précède une opération de masquage sur la même table est placé en PRE, comme les blocs ADD et UPDATE dépendants déjà pris en charge. La boucle de suppression TMP du fichier SD_POS est conservée entière en POST. Les définitions PL/SQL stockées et les dépendances ambiguës restent à examiner. Un diagnostic UNSUPPORTED bloque la création du Rule Set.
 
 Le fichier .bak est accepté comme texte dans le sélecteur Transformer. Les éléments INFO/IGNORED restent visibles dans le compte rendu sans créer artificiellement des erreurs de revue. Les alertes métier restent bloquantes ou à examiner.
 
 ## Cas fournis et qualification
 
 - STL_anonymise.sql : 5 tables et 7 règles fidèles. Même dérivation pour les deux colonnes PARTY, filtre CLIENT/BROKER conservé, constantes exactes et chaîne de cinq remplacements SWIFT dans les CLOB.
-- FOREX_anonymise.sql : 2 ALTER TABLE métier. Pas de conversion approximative du DROP/ADD en NULLIFY ; import complet non pris en charge et signalé.
-- SD_POS_anonymise.bak : 23 opérations et 117 affectations dans les règles, 2 commandes en PRE (`ADD is_pending_copy` puis son `UPDATE`) et 41 commandes en POST. Les index, alias corrélés, variables dans les sous-requêtes, exceptions et suppression dynamique de tables restent à examiner. Ce fichier n'est pas annoncé comme pris en charge de bout en bout.
+- FOREX_anonymise.sql conserve les deux ALTER TABLE DROP et ADD en POST. Ce fichier structurel seul ne produit aucune règle de masquage.
+- SD_POS_anonymise.bak conserve notamment CREATE INDEX et la boucle de suppression des tables TMP en POST. Les alias corrélés, variables dans les sous-requêtes et blocs d'exception restent à examiner.
 
 Le test Oracle natif exécute le script STL original dans sa branche directe exclusivement sur cinq tables dédiées, puis réinitialise les mêmes données synthétiques et exécute le SQL du Rule Set enregistré/régénéré. La copie en nouveau brouillon v2 et son export SQL sont également vérifiés. Les résultats sont comparés intégralement : rôles inclus et exclus, nulls, textes constants, champs SWIFT préservés et CLOB de plus de 32 Ko. Les métadonnées et le catalogue de test sont annulés et les tables dédiées supprimées. Aucun script fourni n'est exécuté sur des tables métier.
 

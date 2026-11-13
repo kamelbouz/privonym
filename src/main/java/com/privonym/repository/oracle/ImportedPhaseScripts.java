@@ -101,6 +101,6 @@ final class ImportedPhaseScripts {
         }
     }
     private static boolean hasStructuralSql(String sql) {
-        return sql!=null&&Pattern.compile("(?im)^\\s*ALTER\\s+TABLE\\b").matcher(sql).find();
+        return sql!=null&&Pattern.compile("(?i)\\b(?:ALTER|CREATE|DROP|TRUNCATE|RENAME|COMMENT|GRANT|REVOKE|AUDIT|NOAUDIT|FLASHBACK|PURGE)\\b").matcher(sql).find();
     }
 }

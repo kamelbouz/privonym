@@ -14,7 +14,7 @@ import java.util.HashSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-/** Reconstructs a masking inventory from Oracle UPDATE, DELETE and TRUNCATE SQL. */
+/** Reconstructs a masking inventory from Oracle masking SQL and structural scripts. */
 public final class OracleSqlInventoryPreviewService
         implements PreviewSqlInventoryUseCase, SqlDialectParser {
     private static final String IDENTIFIER = "(?:\\\"(?:\\\"\\\"|[^\\\"])+\\\"|[A-Za-z][A-Za-z0-9_$#]*)";
@@ -29,8 +29,6 @@ public final class OracleSqlInventoryPreviewService
             "(?is)^\\s*UPDATE\\s+" + QUALIFIED_NAME + "(?:\\s+(?:AS\\s+)?[A-Za-z0-9_$#]+)?\\s+SET\\s+");
     private static final Pattern DELETE = Pattern.compile(
             "(?is)^\\s*DELETE\\s+FROM\\s+" + QUALIFIED_NAME + "(?:\\s+WHERE\\s+(.+))?\\s*$");
-    private static final Pattern TRUNCATE = Pattern.compile(
-            "(?is)^\\s*TRUNCATE\\s+TABLE\\s+" + QUALIFIED_NAME + "(?:\\s+.*)?$");
     private static final Pattern MERGE = Pattern.compile(
             "(?is)^\\s*MERGE\\s+INTO\\s+" + QUALIFIED_NAME
                     + "(?:\\s+(?:AS\\s+)?[A-Za-z0-9_$#]+)?\\s+USING\\b");
@@ -38,6 +36,13 @@ public final class OracleSqlInventoryPreviewService
             "(?is)^\\s*(?:[A-Za-z0-9_$#]+\\.)?(\\\"[^\\\"]+\\\"|[A-Za-z0-9_$#]+)\\s*=\\s*(.+)$");
     private static final Pattern STRING_LITERAL = Pattern.compile("(?is)^N?'(?:''|[^'])*'$");
 
+    private static final Pattern DDL = Pattern.compile("(?is)^(?:ALTER|CREATE|DROP|TRUNCATE|RENAME|COMMENT|GRANT|REVOKE|AUDIT|NOAUDIT|FLASHBACK|PURGE)\\b.*");
+    private static final Pattern TABLE_CLEANUP = Pattern.compile(
+            "(?is)^BEGIN\\s+FOR\\s+([A-Za-z][A-Za-z0-9_]*)\\s+IN\\s*\\(\\s*SELECT\\s+\\*\\s+FROM\\s+USER_TABLES"
+            + "\\s+WHERE\\s+TABLE_NAME\\s+LIKE\\s+'TMP_%'\\s+ORDER\\s+BY\\s+TABLE_NAME\\s*\\)\\s+LOOP"
+            + "\\s+EXECUTE\\s+IMMEDIATE\\s+'DROP TABLE '\\s*\\|\\|\\s*\\1\\.TABLE_NAME\\s*\\|\\|\\s*' PURGE'\\s*;"
+            + "(?:\\s*DBMS_OUTPUT\\.PUT_LINE\\('-> table '\\s*\\|\\|\\s*\\1\\.TABLE_NAME\\s*\\|\\|\\s*' dropped'\\)\\s*;)?"
+            + "\\s*END\\s+LOOP\\s*;\\s*END\\s*;?$");
     @Override
     public SqlInventoryPreview preview(String technology, String sql) {
         if (technology == null || !"ORACLE".equalsIgnoreCase(technology.trim())) {
@@ -79,14 +84,33 @@ public final class OracleSqlInventoryPreviewService
             Matcher laterUpdate=UPDATE.matcher(statement);
             if(laterUpdate.find()&&alteredTables.contains(String.join(" ",OracleImportedExpression.tokens(laterUpdate.group(1)))))
                 warnings.add("[UNSUPPORTED] Statement "+item.number()+": UPDATE follows ALTER TABLE on the same table; moving that ALTER to POST would change dependency order");
-            if(statement.stripLeading().matches("(?is)^(ALTER|DROP|CREATE)\\b.*")){warnings.add("[UNSUPPORTED] Statement "+item.number()+": business DDL cannot be discarded or executed as a masking rule: "+statement.strip().split("\\s+",3)[0]);continue;}
+            if (TABLE_CLEANUP.matcher(statement).matches()) {
+                post.add(statement.strip() + ";\n/");
+                warnings.add("[INFO] Statement " + item.number() + ": table cleanup block preserved in POST");
+                continue;
+            }
+            Matcher truncate = Pattern.compile("(?is)^TRUNCATE\\s+TABLE\\s+" + QUALIFIED_NAME + "(?:\\s+.*)?$").matcher(statement);
+            if (truncate.matches()) {
+                List<String> target = OracleImportedExpression.tokens(truncate.group(1));
+                boolean usedLater = script.statements().stream().filter(next -> next.number() > item.number())
+                        .anyMatch(next -> targetsTable(next.sql(), target));
+                if (usedLater) {
+                    pre.add(statement.strip() + ";");
+                    warnings.add("[INFO] Statement " + item.number() + ": TRUNCATE precedes masking on this table and was preserved in PRE");
+                    continue;
+                }
+            }
+            if (DDL.matcher(statement).matches()) {
+                post.add(statement.strip() + ";");
+                warnings.add("[INFO] Statement " + item.number() + ": DDL preserved in POST");
+                continue;
+            }
             if(statement.stripLeading().matches("(?is)^SELECT\\b.*")){warnings.add("[IGNORED] Statement "+item.number()+": reporting SELECT not imported as a masking rule");continue;}
             if (parseUpdate(statement, item.number(), entries, warnings)) continue;
             if (parseMerge(statement, item.number(), entries, warnings)) continue;
             if (parseDelete(statement, item.number(), entries, warnings)) continue;
-            if (parseTruncate(statement, item.number(), entries)) continue;
             warnings.add("[UNSUPPORTED] Statement " + item.number()
-                    + " is not an UPDATE, MERGE, DELETE or TRUNCATE operation");
+                    + " cannot be classified as a masking operation or a phase script");
         }
         List<SqlInventoryTable> applicableEntries = retainApplicableAlgorithms(entries, warnings);
         if (applicableEntries.isEmpty()) warnings.add("No masking operation was detected");
@@ -94,6 +118,13 @@ public final class OracleSqlInventoryPreviewService
                 applicableEntries, warnings,String.join("\n",pre),String.join("\n",post));
     }
 
+    private static boolean targetsTable(String sql, List<String> target) {
+        for (Pattern operation : List.of(UPDATE, DELETE, MERGE)) {
+            Matcher match = operation.matcher(sql);
+            if (match.find() && OracleImportedExpression.tokens(match.group(1)).equals(target)) return true;
+        }
+        return false;
+    }
     private static Set<Integer> preparationStatements(List<ScriptStatement> statements,List<String> warnings) {
         Set<Integer> pre=new HashSet<>();
         Pattern add=Pattern.compile("(?is)^\\s*ALTER\\s+TABLE\\s+"+QUALIFIED_NAME+"\\s+ADD\\s+(.+)$");
@@ -140,12 +171,29 @@ public final class OracleSqlInventoryPreviewService
         List<String> parallelCandidates=new ArrayList<>();
         boolean conditionalParallel=false;
         int sourceNumber = 0;
-        for (String raw : fragments) {
+        for (int index = 0; index < fragments.size(); index++) {
+            String raw = fragments.get(index);
+            if (raw.stripLeading().matches("(?is)^BEGIN\\s+FOR\\b.*")) {
+                for (int size : List.of(3, 4)) {
+                    if (index + size > fragments.size()) continue;
+                    String block = String.join(";\n", fragments.subList(index, index + size)).strip();
+                    if (TABLE_CLEANUP.matcher(block).matches()) {
+                        statements.add(new ScriptStatement(++sourceNumber, block));
+                        index += size - 1;
+                        raw = "";
+                        break;
+                    }
+                }
+            }
             String fragment = raw.trim();
             if (fragment.isEmpty()) continue;
             sourceNumber++;
             if(fragment.matches("(?is)(COMMIT|ROLLBACK)\\s*")){warnings.add("[IGNORED] Transaction directive: "+fragment);continue;}
-            if(fragment.matches("(?is)^(ALTER|DROP|CREATE)\\b.*")){statements.add(new ScriptStatement(sourceNumber,fragment));continue;}
+            if (fragment.matches("(?is)^CREATE\\s+(?:OR\\s+REPLACE\\s+)?(?:PROCEDURE|FUNCTION|PACKAGE|TRIGGER|TYPE\\s+BODY)\\b.*")) {
+                warnings.add("[UNSUPPORTED] Statement " + sourceNumber + ": stored PL/SQL definition requires preserving its complete body");
+                continue;
+            }
+            if(DDL.matcher(fragment).matches()){statements.add(new ScriptStatement(sourceNumber,fragment));continue;}
             if(fragment.stripLeading().toUpperCase(Locale.ROOT).startsWith("EXCEPTION")){warnings.add("[UNSUPPORTED] Exception handling affects execution semantics and requires review");continue;}
             List<String> fragmentTokens=OracleImportedExpression.tokens(fragment);
             if(fragmentTokens.contains("IF")&&!fragmentTokens.get(0).equals("END"))conditionalParallel=true;
@@ -497,16 +545,6 @@ public final class OracleSqlInventoryPreviewService
                 + ": filtered DELETE requires manual review");
         entries.add(new SqlInventoryTable(name.schema(), name.object(), "DELETE",
                 "DELETE_TABLE_ROWS", filter, List.of()));
-        return true;
-    }
-
-    private static boolean parseTruncate(String statement, int number,
-            List<SqlInventoryTable> entries) {
-        Matcher truncate = TRUNCATE.matcher(statement);
-        if (!truncate.matches()) return false;
-        Name name = name(truncate.group(1));
-        entries.add(new SqlInventoryTable(name.schema(), name.object(), "TRUNCATE",
-                "TRUNCATE_TABLE", "", List.of()));
         return true;
     }
 

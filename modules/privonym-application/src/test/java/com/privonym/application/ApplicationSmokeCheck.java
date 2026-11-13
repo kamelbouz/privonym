@@ -82,7 +82,7 @@ public final class ApplicationSmokeCheck {
                 """;
         SqlInventoryPreview preview = new OracleSqlInventoryPreviewService().preview("ORACLE", ddl);
         assertEquals(2, preview.statementCount(), "masking statement count");
-        assertEquals(2, preview.tables().size(), "detected operation count");
+        assertEquals(1, preview.tables().size(), "detected operation count");
         assertEquals("CUSTOMER", preview.tables().get(0).name(), "detected table");
         assertEquals(2, preview.columnCount(), "detected column rules");
         assertEquals("ORACLE_EXPRESSION_EXACT", preview.tables().get(0).columns().get(0).algorithmCode(),
@@ -91,7 +91,7 @@ public final class ApplicationSmokeCheck {
                 .get("expression"), "original scalar expression preserved");
         assertEquals("NULLIFY", preview.tables().get(0).columns().get(1).algorithmCode(),
                 "detected null algorithm");
-        assertEquals("TRUNCATE_TABLE", preview.tables().get(1).algorithmCode(),
+        assertEquals("TRUNCATE TABLE FORMATION.CUSTOMER_STAGE;", preview.postScript(),
                 "detected structural algorithm");
         assertEquals(64, preview.checksum().length(), "DDL checksum length");
 
@@ -164,10 +164,7 @@ public final class ApplicationSmokeCheck {
                         DELETE FROM APP.CUSTOMER WHERE RETENTION_FLAG = 'Y';
                         UPDATE APP.CUSTOMER SET EMAIL = NULL;
                         """);
-        assertEquals(1, truncatePreview.tables().size(),
-                "TRUNCATE makes all other table algorithms obsolete");
-        assertEquals("TRUNCATE_TABLE", truncatePreview.tables().get(0).algorithmCode(),
-                "TRUNCATE remains the applicable table algorithm");
+        assertEquals("TRUNCATE TABLE APP.CUSTOMER;", truncatePreview.preScript(), "TRUNCATE before masking on the same table is preserved in PRE");
 
         SqlInventoryPreview plsqlPreview = new OracleSqlInventoryPreviewService().preview(
                 "ORACLE", """

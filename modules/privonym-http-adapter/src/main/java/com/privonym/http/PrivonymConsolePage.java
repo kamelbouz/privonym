@@ -839,10 +839,15 @@ final class PrivonymConsolePage {
                     <article class="card"><div class="label">Table operations</div><div id="preview-tables" class="metric">0</div></article>
                     <article class="card"><div class="label">Column rules</div><div id="preview-columns" class="metric">0</div></article>
                     <article class="card"><div class="label">Report items</div><div id="preview-warnings" class="metric">0</div></article></div>
-                  <div id="preview-message" class="empty"></div><div id="preview-results"></div>
+                  <div id="preview-message" class="empty"></div>
+                  <section id="preview-blockers" hidden>
+                    <h3 id="preview-blockers-title" class="section-title"></h3>
+                    <ol id="preview-blockers-list"></ol>
+                  </section>
+                  <div id="preview-results"></div>
                   <section id="preview-pre-panel" hidden><h3 class="section-title">Generated PRE script</h3><p class="hint">Dependent ADD/UPDATE operations run together before masking. Attached to a new Job from this version. No statement is executed during import.</p><pre id="preview-pre" class="code"></pre><button id="download-pre" type="button">Download PRE SQL</button></section>
                   <section id="preview-post-panel" hidden><h3 class="section-title">Generated POST script</h3><p class="hint">Preserved in source order and attached to a new Job from this version. It runs after masking. No statement is executed during import.</p><pre id="preview-post" class="code"></pre><button id="download-post" type="button">Download POST SQL</button></section>
-                  <h3 class="section-title">Import report</h3><ul id="warning-list" class="hint"></ul>
+                  <h3 class="section-title">Other import report items</h3><ul id="warning-list" class="hint"></ul>
                   <p id="preview-checksum" class="hint code"></p></section>
                 """;
         String script = """
@@ -867,6 +872,7 @@ final class PrivonymConsolePage {
                 analyze.addEventListener('click',async event=>{const button=event.currentTarget;
                   button.disabled=true;button.textContent='Analyzing…';const panel=document.getElementById('preview-panel');panel.hidden=false;
                   const message=document.getElementById('preview-message');message.textContent='Reconstructing masking rules…';message.classList.remove('error');
+                  document.getElementById('preview-blockers').hidden=true;
                   try{const response=await fetch('/api/v1/transformations/preview?dataSourceId='+encodeURIComponent(dataSource.value),{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8','Accept':'application/json'},body:input.value});
                     const payload=await response.json();if(!response.ok)throw new Error(payload.message||('HTTP '+response.status));renderSqlPreview(payload);}
                   catch(error){message.textContent='Unable to analyze SQL: '+error.message;message.classList.add('error');}
@@ -880,9 +886,21 @@ final class PrivonymConsolePage {
                     table.columns.forEach(column=>{const row=document.createElement('tr');cell(row,column.position);cell(row,column.name,'code');cell(row,column.algorithmCode,'code');
                       cell(row,table.filterExpression||'ALL ROWS','code');cell(row,Object.entries(column.parameters).map(([key,value])=>key+'='+value).join(', ')||'—');cell(row,column.matchStatus);cell(row,column.sourceExpression,'code');grid.querySelector('tbody').appendChild(row);});results.appendChild(grid);}});
                   for(const phase of ['pre','post']){const text=payload[phase+'Script']||'';document.getElementById('preview-'+phase+'-panel').hidden=!text;document.getElementById('preview-'+phase).textContent=text;document.getElementById('download-'+phase).onclick=()=>{const url=URL.createObjectURL(new Blob([text],{type:'text/plain;charset=utf-8'})),link=document.createElement('a');link.href=url;link.download='privonym-'+phase+'.sql';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};}
-                  const warnings=document.getElementById('warning-list');warnings.replaceChildren();payload.warnings.forEach(value=>{const item=document.createElement('li');item.textContent=value;warnings.appendChild(item);});
-                  document.getElementById('preview-message').textContent=payload.tableCount?'Review every algorithm match before creating the draft inventory.':'No masking operation was detected.';
-                  document.getElementById('preview-checksum').textContent='SHA-256: '+payload.checksum;const blockers=payload.warnings.filter(w=>w.startsWith('[UNSUPPORTED]'));previewPublishable=payload.tableCount>0&&!blockers.length;if(blockers.length)document.getElementById('preview-message').textContent='Import blocked by '+blockers.length+' script operation(s), even if all column expressions are matched. '+blockers[0]+' See Import report for every blocking item.';analyzedDataSourceId=dataSource.value;updatePublish();}
+                  const warnings=document.getElementById('warning-list'),blockerList=document.getElementById('preview-blockers-list');
+                  warnings.replaceChildren();blockerList.replaceChildren();
+                  for(const value of payload.warnings){
+                    const item=document.createElement('li');item.textContent=value;
+                    (value.startsWith('[UNSUPPORTED]')?blockerList:warnings).appendChild(item);
+                  }
+                  const blockerCount=blockerList.childElementCount;
+                  document.getElementById('preview-blockers').hidden=blockerCount===0;
+                  document.getElementById('preview-blockers-title').textContent='Blocking report items ('+blockerCount+')';
+                  const message=document.getElementById('preview-message');
+                  message.textContent=blockerCount?'Review the items below before importing.':payload.tableCount?'Review every algorithm match before creating the draft inventory.':'No masking operation was detected.';
+                  message.classList.toggle('error',blockerCount>0);
+                  document.getElementById('preview-checksum').textContent='SHA-256: '+payload.checksum;
+                  previewPublishable=payload.tableCount>0&&blockerCount===0;
+                  analyzedDataSourceId=dataSource.value;updatePublish();}
                 publish.addEventListener('click',async()=>{if(publish.disabled)return;publish.disabled=true;publish.textContent='Creating draft…';
                   const message=document.getElementById('preview-message');message.classList.remove('error');
                   const query=new URLSearchParams({name:inventoryName.value.trim()});

@@ -1,5 +1,13 @@
 # Corrections du 24 octobre 2026
 
+Le service Windows utilise le lanceur `privonym-server.ps1` avec le paramètre
+`-JavaPath` pour sélectionner Java 17. Le lanceur copie les quatre JARs applicatifs
+dans un répertoire temporaire propre au démarrage. Cela préserve les fichiers
+ouverts par la JVM pendant la copie d'une nouvelle livraison dans `target`.
+Une livraison devient active au redémarrage du service. La configuration WinSW
+de l'installation appelle ce lanceur PowerShell et lui transmet le chemin absolu
+de Java.
+
 Le 19 novembre 2026, la confirmation d'un exécuteur arrêté termine désormais
 l'annulation en CANCELLED lorsqu'aucun chunk n'existe et qu'aucune phase PRE/POST
 ne possède un démarrage sans reçu de fin. La confirmation reste explicite et

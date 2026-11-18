@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([string]$JavaPath = 'java')
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -28,7 +28,7 @@ try {
     }
 
     $secretKeyFile = Join-Path $projectRoot 'config\privonym-secret.key'
-    & java "-Dprivonym.secret.key.file=$secretKeyFile" -classpath "$runRoot\*;$projectRoot\lib\*" `
+    & $JavaPath "-Dprivonym.secret.key.file=$secretKeyFile" -classpath "$runRoot\*;$projectRoot\lib\*" `
         com.privonym.server.PrivonymServerLauncher
     $serverExitCode = $LASTEXITCODE
 } finally {

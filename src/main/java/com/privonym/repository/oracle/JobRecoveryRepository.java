@@ -76,7 +76,22 @@ final class JobRecoveryRepository {
         }
         if(decision.equals("STOPPED")) {
             if(!stale||!List.of("RUNNING","RETRYING","CANCELLING").contains(status))throw new IllegalStateException("Runner is not eligible for stopped-runner confirmation");
-            try(PreparedStatement q=c.prepareStatement("UPDATE anonymization_job SET status='EXECUTION_FAILED',ended_at=SYSTIMESTAMP,error_code='RECOVERY_REQUIRED',error_message='Operator confirmed stopped runner; chunks still require reconciliation' WHERE job_id=?")){q.setLong(1,jobId);q.executeUpdate();}
+            boolean cancelled = status.equals("CANCELLING") && hasNoChunks(c,jobId)
+                    && ScriptPhaseJournal.state(c,jobId,"PRE") != 1
+                    && ScriptPhaseJournal.state(c,jobId,"POST") != 1;
+            if (cancelled) {
+                try (PreparedStatement q=c.prepareStatement("UPDATE job_step_attempt SET status='CANCELLED',ended_at=SYSTIMESTAMP,heartbeat_at=SYSTIMESTAMP WHERE status='RUNNING' AND job_step_id IN(SELECT job_step_id FROM job_step WHERE job_id=?)")) {
+                    q.setLong(1,jobId);q.executeUpdate();
+                }
+                try (PreparedStatement q=c.prepareStatement("UPDATE job_step SET status='CANCELLED',ended_at=SYSTIMESTAMP WHERE job_id=? AND status='RUNNING'")) {
+                    q.setLong(1,jobId);q.executeUpdate();
+                }
+                try (PreparedStatement q=c.prepareStatement("UPDATE anonymization_job SET status='CANCELLED',ended_at=SYSTIMESTAMP,heartbeat_at=SYSTIMESTAMP,error_code=NULL,error_message=NULL WHERE job_id=?")) {
+                    q.setLong(1,jobId);q.executeUpdate();
+                }
+            } else {
+                try(PreparedStatement q=c.prepareStatement("UPDATE anonymization_job SET status='EXECUTION_FAILED',ended_at=SYSTIMESTAMP,error_code='RECOVERY_REQUIRED',error_message='Operator confirmed stopped runner; chunks or script outcomes require recovery review' WHERE job_id=?")){q.setLong(1,jobId);q.executeUpdate();}
+            }
         } else {
             if(!terminal(status))throw new IllegalStateException("Stop the runner and wait for a terminal Job state before reconciling chunks");
             try(PreparedStatement q=c.prepareStatement("SELECT c.status,c.error_message,c.ended_at FROM job_chunk c JOIN job_step s ON s.job_step_id=c.job_step_id WHERE c.chunk_id=? AND s.job_id=? FOR UPDATE OF c.status")) {
@@ -94,6 +109,11 @@ final class JobRecoveryRepository {
         }
         try(PreparedStatement q=c.prepareStatement("INSERT INTO job_event(job_id,event_timestamp,severity,event_code,message) VALUES(?,SYSTIMESTAMP,'WARN','OPERATOR_RECOVERY_DECISION',?)")) {
             q.setLong(1,jobId);q.setString(2,"Actor="+actor+" decision="+decision+" chunk="+chunkId+" rows="+rows+" verification="+note);q.executeUpdate();
+        }
+    }
+    private static boolean hasNoChunks(Connection c,long jobId)throws SQLException {
+        try (PreparedStatement q=c.prepareStatement("SELECT COUNT(*) FROM job_chunk c JOIN job_step s ON s.job_step_id=c.job_step_id WHERE s.job_id=?")) {
+            q.setLong(1,jobId);try(ResultSet rows=q.executeQuery()){rows.next();return rows.getLong(1)==0;}
         }
     }
 }

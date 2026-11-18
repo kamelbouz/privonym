@@ -1,5 +1,13 @@
 # Corrections du 24 octobre 2026
 
+Le 19 novembre 2026, la confirmation d'un exécuteur arrêté termine désormais
+l'annulation en CANCELLED lorsqu'aucun chunk n'existe et qu'aucune phase PRE/POST
+ne possède un démarrage sans reçu de fin. La confirmation reste explicite et
+auditée. Un heartbeat récent refuse cette récupération. Les autres cas passent
+par l'examen des résultats d'exécution. Le job 61 a été annulé après vérification
+de son identité, de son heartbeat du 9 novembre, de l'absence de chunks et de
+sessions SQL Server pour son compte cible.
+
 Import SQL fidèle (Oracle, SQL Server, PostgreSQL) : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
 
 Import Oracle : les ADD suivis d'un UPDATE dépendant contigu sont conservés

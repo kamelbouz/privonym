@@ -93,6 +93,13 @@ la publication, un job de 2 500 lignes à deux workers, une erreur provoquée,
 la reprise sans rejouer les chunks validés et un verrou de commit concurrent.
 Les contrôles hors base vérifient aussi la conservation des littéraux SQL importés.
 
-La fabrication d'une archive Linux sur Windows ne remplace pas une exécution sur
-Linux. Une qualification sur Linux reste nécessaire avant de déclarer cette
-distribution validée sur ce système.
+Le 24 novembre 2026, la compilation Windows et l'exécution de l'archive sur Ubuntu
+avec Java 17 et PostgreSQL 17 ont réussi dans
+[le pipeline de validation](https://github.com/kamelbouz/privonym/actions/runs/45472495833).
+Le test Linux inclut l'initialisation, le job synthétique, sa reprise après erreur,
+le verrou concurrent et le démarrage/arrêt du serveur empaqueté. Cela ne qualifie
+pas automatiquement toutes les distributions Linux ni les services systemd.
+
+Les cibles Oracle et SQL Server conservent leurs adaptateurs et sont couvertes
+par les contrôles hors base existants. Leur exécution réelle avec un référentiel
+PostgreSQL reste à qualifier sur des jeux de données dédiés.

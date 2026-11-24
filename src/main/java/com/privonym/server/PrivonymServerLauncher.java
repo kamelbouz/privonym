@@ -53,6 +53,17 @@ public final class PrivonymServerLauncher {
         String repositoryUser = required(properties, "repository.user");
         DriverManager.setLoginTimeout(15);
         RepositorySession session = new RepositorySession(repositoryUrl, repositoryUser);
+        // An installation-owned credential may connect the PostgreSQL repository at startup.
+        // Application-user authentication remains mandatory in the HTTP adapter.
+        if (repositoryUrl.startsWith("jdbc:postgresql:")) {
+            String configuredPassword = System.getenv("PRIVONYM_REPOSITORY_PASSWORD");
+            if (configuredPassword == null) configuredPassword = properties.getProperty("repository.password");
+            if (configuredPassword != null && !configuredPassword.isBlank()) {
+                char[] password = configuredPassword.toCharArray();
+                try { session.login(password); }
+                finally { java.util.Arrays.fill(password, '\0'); }
+            }
+        }
         Server server = PrivonymHttpServer.create(serverConfiguration.host(),
                 serverConfiguration.port(), session.jobs(), session.environments(), session.inventory(),
                 session.draftInventory(), session.maskingInventories(), session.inventoryManagement(),
@@ -63,7 +74,7 @@ public final class PrivonymServerLauncher {
         server.start();
         System.out.printf("Privonym server listening on http://%s:%d/%n",
                 serverConfiguration.host(), serverConfiguration.port());
-        System.out.printf("Open http://%s:%d/login to connect the Oracle repository.%n",
+        System.out.printf("Open http://%s:%d/login to connect the repository.%n",
                 serverConfiguration.host(), serverConfiguration.port());
         server.join();
     }
@@ -130,7 +141,7 @@ public final class PrivonymServerLauncher {
 
         @Override public synchronized void login(char[] password) {
             if (isConnected()) return;
-            try (Connection connection = DriverManager.getConnection(url, user, new String(password))) {
+            try (Connection connection = com.privonym.repository.RepositoryConnections.open(url, user, new String(password))) {
                 if (!connection.isValid(5)) {
                     throw new IllegalStateException("Repository connection validation failed");
                 }

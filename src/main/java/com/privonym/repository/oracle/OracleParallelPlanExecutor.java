@@ -867,7 +867,7 @@ public final class OracleParallelPlanExecutor implements TargetPlanExecutor, Aut
     }
 
     private Connection openRepository() throws SQLException {
-        Connection connection = DriverManager.getConnection(repositoryUrl, repositoryUser,
+        Connection connection = com.privonym.repository.RepositoryConnections.open(repositoryUrl, repositoryUser,
                 new String(repositoryPassword));
         connection.setAutoCommit(false);
         return connection;

@@ -1,5 +1,8 @@
 # Privonym
 
+Référentiel PostgreSQL 17 et distributions Windows/Linux :
+[installation, migration et vérifications](REFERENTIEL_POSTGRESQL.md).
+
 Import SQL fidèle (Oracle, SQL Server, PostgreSQL) : [IMPORT_SQL_FIDELE.md](IMPORT_SQL_FIDELE.md).
 
 Reprise vérifiée sans intervention SQL : [REPRISE_ORACLE.md](REPRISE_ORACLE.md).
@@ -13,7 +16,7 @@ Corrections de confidentialité et d'accès du 8 novembre 2026 :
 
 Privonym est une application Java de masquage de données : découverte de colonnes
 sensibles, règles versionnées, génération SQL, contrôles préalables, exécution
-de jobs et rapports. Le référentiel est Oracle ; les adaptateurs cibles couvrent
+de jobs et rapports. Les référentiels Oracle et PostgreSQL sont pris en charge ; les adaptateurs cibles couvrent
 Oracle, PostgreSQL et Microsoft SQL Server.
 
 Le code de référence est importé sous le tag `v2.5.0`. Les capacités sont présentes

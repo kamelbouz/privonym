@@ -1,5 +1,8 @@
 # Compilation, tests et scripts
 
+Les archives d'exécution Windows/Linux et les tests du référentiel PostgreSQL sont
+décrits dans [REFERENTIEL_POSTGRESQL.md](REFERENTIEL_POSTGRESQL.md).
+
 Lot 3 — référentiel et reproductibilité : [LOT3_REFERENTIEL.md](LOT3_REFERENTIEL.md).
 
 ## Prérequis

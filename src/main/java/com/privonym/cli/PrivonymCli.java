@@ -96,8 +96,7 @@ public final class PrivonymCli {
 
         try {
             DriverManager.setLoginTimeout(15);
-            try (Connection connection = DriverManager.getConnection(
-                    url, user, new String(password))) {
+            try (Connection connection = com.privonym.repository.RepositoryConnections.open(url, user, new String(password))) {
                 connection.setReadOnly("preview".equals(command) && !save);
                 connection.setAutoCommit(false);
                 if ("preview".equals(command)) {
@@ -235,7 +234,7 @@ public final class PrivonymCli {
                     }
                 } else {
                     result = new ExecuteJobService(repository, repository,
-                            new OracleMeasuredPlanExecutor(connection, target,()->DriverManager.getConnection(repositoryUrl,repositoryUser,new String(repositoryPassword))), repository,
+                            new OracleMeasuredPlanExecutor(connection, target,()->com.privonym.repository.RepositoryConnections.open(repositoryUrl,repositoryUser,new String(repositoryPassword))), repository,
                             Instant::now).execute(new ExecuteJobCommand(job.id(), executionMode,
                                     recoveryMode));
                 }

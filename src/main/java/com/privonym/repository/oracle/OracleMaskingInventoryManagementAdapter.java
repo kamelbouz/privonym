@@ -634,7 +634,7 @@ public final class OracleMaskingInventoryManagementAdapter
     }
 
     private Connection open(boolean readOnly) throws SQLException {
-        Connection connection = DriverManager.getConnection(jdbcUrl, username, new String(password));
+        Connection connection = com.privonym.repository.RepositoryConnections.open(jdbcUrl, username, new String(password));
         connection.setReadOnly(readOnly);
         connection.setAutoCommit(false);
         return connection;

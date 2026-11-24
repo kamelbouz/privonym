@@ -639,7 +639,7 @@ public final class OracleDraftInventoryAdapter implements DraftInventoryReposito
     }
 
     private Connection open() throws SQLException {
-        Connection connection = DriverManager.getConnection(jdbcUrl, username, new String(password));
+        Connection connection = com.privonym.repository.RepositoryConnections.open(jdbcUrl, username, new String(password));
         connection.setAutoCommit(false);
         return connection;
     }

@@ -1,0 +1,6 @@
+# PostgreSQL repository (not a target database). Password is requested at web login.
+# Create the database and its dedicated login role before initializing a new repository.
+repository.url=jdbc:postgresql://localhost:5432/privonym
+repository.user=privonym
+server.host=127.0.0.1
+server.port=8080

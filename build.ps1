@@ -246,7 +246,7 @@ $testSources = Get-ChildItem -LiteralPath $testRoot -Recurse -Filter '*.java' |
 
 if ($testSources) {
     & $javacCommandPath --release 17 `
-        -classpath "$domainClassesRoot;$applicationClassesRoot;$classesRoot" `
+        -classpath "$domainClassesRoot;$applicationClassesRoot;$httpClassesRoot;$classesRoot" `
         -Xlint:all `
         -Werror `
         -encoding UTF-8 `
@@ -286,6 +286,12 @@ if ($testSources) {
 
     if ($LASTEXITCODE -ne 0) {
         throw "Oracle migration script checks failed with exit code $LASTEXITCODE"
+    }
+
+    & $javaCommandPath -classpath "$domainClassesRoot;$applicationClassesRoot;$classesRoot;$testClassesRoot" `
+        com.privonym.install.PostgresqlRepositorySmokeCheck
+    if ($LASTEXITCODE -ne 0) {
+        throw "PostgreSQL repository smoke checks failed with exit code $LASTEXITCODE"
     }
 
 }

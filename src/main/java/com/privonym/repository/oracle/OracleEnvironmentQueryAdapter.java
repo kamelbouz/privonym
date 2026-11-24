@@ -94,7 +94,7 @@ public final class OracleEnvironmentQueryAdapter implements EnvironmentQueryRepo
                 INSERT INTO environment(code,name,description,status,owner_name)
                 VALUES(?,?,?,'ACTIVE',?)
                 """;
-        try (Connection connection = DriverManager.getConnection(
+        try (Connection connection = com.privonym.repository.RepositoryConnections.open(
                 jdbcUrl, username, new String(password))) {
             connection.setAutoCommit(false);
             try (PreparedStatement statement = connection.prepareStatement(sql)) {
@@ -226,7 +226,7 @@ public final class OracleEnvironmentQueryAdapter implements EnvironmentQueryRepo
     }
 
     private Connection open() throws SQLException {
-        Connection connection = DriverManager.getConnection(jdbcUrl, username, new String(password));
+        Connection connection = com.privonym.repository.RepositoryConnections.open(jdbcUrl, username, new String(password));
         connection.setReadOnly(true);
         connection.setAutoCommit(false);
         return connection;

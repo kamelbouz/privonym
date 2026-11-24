@@ -57,16 +57,10 @@ public final class OracleRulesetAdministrationAdapter
                      WHERE rv.ruleset_id = r.ruleset_id) version_count,
                    ((SELECT COUNT(*) FROM masking_rule mr
                      WHERE mr.ruleset_version_id = (
-                           SELECT MAX(rv2.ruleset_version_id)
-                             KEEP (DENSE_RANK LAST ORDER BY rv2.version_number)
-                             FROM ruleset_version rv2
-                            WHERE rv2.ruleset_id = r.ruleset_id)) +
+                           SELECT rv2.ruleset_version_id FROM ruleset_version rv2 WHERE rv2.ruleset_id = r.ruleset_id ORDER BY rv2.version_number DESC FETCH FIRST 1 ROW ONLY)) +
                     (SELECT COUNT(*) FROM table_masking_rule tr
                      WHERE tr.ruleset_version_id = (
-                           SELECT MAX(rv2.ruleset_version_id)
-                             KEEP (DENSE_RANK LAST ORDER BY rv2.version_number)
-                             FROM ruleset_version rv2
-                            WHERE rv2.ruleset_id = r.ruleset_id))) inventory_count,
+                           SELECT rv2.ruleset_version_id FROM ruleset_version rv2 WHERE rv2.ruleset_id = r.ruleset_id ORDER BY rv2.version_number DESC FETCH FIRST 1 ROW ONLY))) inventory_count,
                    (SELECT COUNT(*) FROM anonymization_job j
                      JOIN ruleset_version rv3
                        ON rv3.ruleset_version_id = j.ruleset_version_id
@@ -2295,7 +2289,7 @@ public final class OracleRulesetAdministrationAdapter
     }
 
     private Connection open(boolean readOnly) throws SQLException {
-        Connection connection = DriverManager.getConnection(jdbcUrl, username, new String(password));
+        Connection connection = com.privonym.repository.RepositoryConnections.open(jdbcUrl, username, new String(password));
         connection.setReadOnly(readOnly);
         connection.setAutoCommit(false);
         return connection;

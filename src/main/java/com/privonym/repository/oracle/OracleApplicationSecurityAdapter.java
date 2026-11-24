@@ -533,7 +533,7 @@ public final class OracleApplicationSecurityAdapter implements ApplicationSecuri
     }
 
     private Connection open() throws SQLException {
-        return DriverManager.getConnection(jdbcUrl, repositoryUser, new String(repositoryPassword));
+        return com.privonym.repository.RepositoryConnections.open(jdbcUrl, repositoryUser, new String(repositoryPassword));
     }
 
     private static IllegalStateException failure(String operation, SQLException error) {

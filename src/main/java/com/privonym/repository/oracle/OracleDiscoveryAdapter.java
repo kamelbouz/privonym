@@ -448,12 +448,18 @@ public final class OracleDiscoveryAdapter implements DiscoveryUseCase, AutoClose
         return null;
     }
     private static String suggest(List<MaskingAlgorithmOption> algorithms,List<String> hints){for(String h:hints)for(MaskingAlgorithmOption a:algorithms)if((a.code()+" "+a.name()+" "+a.category()).toUpperCase(Locale.ROOT).contains(h))return a.code();return algorithms.isEmpty()?"":algorithms.get(0).code();}
-    private Connection open(boolean readOnly)throws SQLException{Connection c=DriverManager.getConnection(jdbcUrl,username,new String(password));c.setReadOnly(readOnly);c.setAutoCommit(false);return c;}
+    private Connection open(boolean readOnly)throws SQLException{Connection c=com.privonym.repository.RepositoryConnections.open(jdbcUrl,username,new String(password));c.setReadOnly(readOnly);c.setAutoCommit(false);return c;}
     private void ensureCredentialColumns(){try(Connection c=open(false);Statement s=c.createStatement()){for(String ddl:List.of("ALTER TABLE connector ADD (schema_name VARCHAR2(128))","ALTER TABLE connector ADD (encrypted_password VARCHAR2(4000))")){try{s.executeUpdate(ddl);}catch(SQLException e){if(e.getErrorCode()!=1430)throw e;}}c.commit();}catch(SQLException e){throw failure("install connector credential columns",e);}}
     private void ensureCatalogRescanSupport(){try(Connection c=open(false);Statement s=c.createStatement()){try{s.executeUpdate("ALTER TABLE catalog_column DROP CONSTRAINT catalog_column_position_uk");}catch(SQLException e){if(e.getErrorCode()!=2443)throw e;}try{s.executeUpdate("CREATE INDEX catalog_column_position_ix ON catalog_column(catalog_table_id,ordinal_position)");}catch(SQLException e){if(e.getErrorCode()!=955)throw e;}c.commit();}catch(SQLException e){throw failure("install catalog rescan support",e);}}
 
     private void ensurePostgresqlAlgorithmImplementations(){
         try(Connection c=open(false)){ensurePostgresqlAlgorithmImplementations(c);c.commit();}catch(SQLException e){throw failure("publish PostgreSQL algorithm implementations",e);}
+    }
+
+    /** Explicit installation operation; never invoked by ordinary repository login. */
+    public static void provisionPortableSystemCatalog(Connection c)throws SQLException {
+        ensurePostgresqlAlgorithmImplementations(c);
+        ensureSqlServerAlgorithmImplementations(c);
     }
 
     static void ensurePostgresqlAlgorithmImplementations(Connection c)throws SQLException{

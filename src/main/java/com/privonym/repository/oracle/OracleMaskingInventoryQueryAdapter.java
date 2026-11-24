@@ -139,7 +139,7 @@ public final class OracleMaskingInventoryQueryAdapter
     }
 
     private Connection open() throws SQLException {
-        Connection connection = DriverManager.getConnection(jdbcUrl, username, new String(password));
+        Connection connection = com.privonym.repository.RepositoryConnections.open(jdbcUrl, username, new String(password));
         connection.setReadOnly(true);
         connection.setAutoCommit(false);
         return connection;

@@ -11,7 +11,9 @@ Ce document décrit le dépôt ; il ne certifie pas une installation en producti
 ## Fonction et périmètre
 
 Privonym prépare et exécute des traitements de masquage sur des bases de données.
-Le référentiel de configuration et d'exécution reste Oracle. Les adaptateurs
+Le référentiel de configuration et d'exécution peut utiliser Oracle ou PostgreSQL 17.
+La migration et les limites de qualification sont décrites dans
+[REFERENTIEL_POSTGRESQL.md](REFERENTIEL_POSTGRESQL.md). Les adaptateurs
 cibles couvrent Oracle, PostgreSQL et Microsoft SQL Server, avec des capacités
 et des contraintes qui dépendent du dialecte et de l'algorithme.
 

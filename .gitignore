@@ -27,3 +27,6 @@ tmp/
 # Local backups and installation-specific audit evidence.
 /backups/
 /audit/
+
+# Verified Windows service binary is bundled in kits, downloaded at packaging time.
+/packaging/windows/vendor/*.exe

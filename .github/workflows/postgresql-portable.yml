@@ -1,7 +1,7 @@
 name: PostgreSQL repository and portable packages
 on:
   push:
-    branches: [main, 'codex/postgresql-windows-linux']
+    branches: [main, 'codex/postgresql-windows-linux', 'codex/installation-kits']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -21,6 +21,9 @@ jobs:
       - name: Build Windows and Linux archives
         shell: pwsh
         run: ./packaging/Build-PrivonymPortablePackages.ps1
+      - name: Exercise Windows installation kit
+        shell: pwsh
+        run: ./packaging/windows/Test-PrivonymKit.ps1 -Archive target/Privonym-Windows-3.0.0-preview.1.zip -CheckService
       - uses: actions/upload-artifact@v4
         with:
           name: privonym-portable
@@ -53,23 +56,33 @@ jobs:
           path: portable
       - name: Verify archive and initialize PostgreSQL
         run: |
-          tar -xzf portable/Privonym-Linux-3.0.0-preview.tar.gz -C portable
-          cd portable/Privonym-3.0.0-preview
+          tar -xzf portable/Privonym-Linux-3.0.0-preview.1.tar.gz -C portable
+          cd portable/Privonym-3.0.0-preview.1
           sha256sum -c SHA256SUMS
           sh -n privonym-server.sh
           sh -n privonym-init-postgresql.sh
           sh -n privonym-job.sh
+          sh -n install.sh
+          install_dir="$RUNNER_TEMP/privonym installed"
+          sh install.sh --prefix "$install_dir"
+          [ "$(stat -c %a "$install_dir/config")" = 700 ]
+          [ "$(stat -c %a "$install_dir/config/privonym.properties")" = 600 ]
+          before=$(sha256sum "$install_dir/config/privonym.properties")
+          if sh install.sh --prefix "$install_dir"; then echo 'Existing installation was not protected'; exit 1; fi
+          [ "$before" = "$(sha256sum "$install_dir/config/privonym.properties")" ]
+          echo "INSTALLED_PRIVONYM=$install_dir" >> "$GITHUB_ENV"
+          cd "$install_dir"
           psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 -c 'CREATE DATABASE privonym_migration_test_20261124_fresh TEMPLATE template0;'
           printf '%s\n' 'repository.url=jdbc:postgresql://localhost:5432/privonym_migration_test_20261124_fresh' 'repository.user=postgres' 'server.port=18080' > config/privonym.properties
           sh privonym-init-postgresql.sh
       - name: Exercise repository, rollback, resume and concurrent commit fence on Linux
         run: |
           mkdir test-classes
-          javac --release 17 -cp 'portable/Privonym-3.0.0-preview/target/*' -d test-classes src/test/java/com/privonym/repository/oracle/PostgresqlRepositoryIntegrationCheck.java
-          java -cp 'test-classes:portable/Privonym-3.0.0-preview/target/*:portable/Privonym-3.0.0-preview/lib/*' com.privonym.repository.oracle.PostgresqlRepositoryIntegrationCheck portable/Privonym-3.0.0-preview/config/privonym.properties
+          javac --release 17 -cp "$INSTALLED_PRIVONYM/target/*" -d test-classes src/test/java/com/privonym/repository/oracle/PostgresqlRepositoryIntegrationCheck.java
+          java -cp "test-classes:$INSTALLED_PRIVONYM/target/*:$INSTALLED_PRIVONYM/lib/*" com.privonym.repository.oracle.PostgresqlRepositoryIntegrationCheck "$INSTALLED_PRIVONYM/config/privonym.properties"
       - name: Start and stop the packaged Linux server
         run: |
-          cd portable/Privonym-3.0.0-preview
+          cd "$INSTALLED_PRIVONYM"
           sh privonym-server.sh > server.log 2>&1 &
           server_pid=$!
           trap 'kill -TERM "$server_pid" 2>/dev/null || true; wait "$server_pid" || true' EXIT
@@ -80,3 +93,6 @@ jobs:
           done
           if [ "$ready" != 1 ]; then cat server.log; exit 1; fi
           grep -qi privonym login.html
+          status=0
+          sh privonym-job.sh -1 || status=$?
+          [ "$status" = 1 ]

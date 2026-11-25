@@ -82,8 +82,9 @@ une réconciliation avant de réutiliser Oracle.
 .\packaging\Build-PrivonymPortablePackages.ps1
 ```
 
-Les sorties sont `target/Privonym-Windows-3.0.0-preview.zip` et
-`target/Privonym-Linux-3.0.0-preview.tar.gz`. `SHA256SUMS` liste le contenu fourni.
+Les sorties sont `target/Privonym-Windows-3.0.0-preview.1.zip` et
+`target/Privonym-Linux-3.0.0-preview.1.tar.gz`. Les installateurs sont décrits dans
+[INSTALLATION_KITS.md](INSTALLATION_KITS.md). `SHA256SUMS` liste le contenu fourni.
 Ni configuration locale, ni clé, ni données du référentiel ne sont incluses.
 
 Les tests PostgreSQL réels sont optionnels :

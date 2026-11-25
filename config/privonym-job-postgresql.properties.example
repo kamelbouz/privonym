@@ -1,0 +1,5 @@
+# Non-interactive runner. No browser/SSO session is required.
+repository.url=jdbc:postgresql://localhost:5432/privonym
+repository.user=privonym
+# Add repository.password in this private configuration before scheduling a job.
+# Protect it with Windows ACLs or chmod 600. Never include it in a shared kit.

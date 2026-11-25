@@ -1,5 +1,8 @@
 # Compilation, tests et scripts
 
+Pour fabriquer les kits avec installateurs Windows/Linux :
+[INSTALLATION_KITS.md](INSTALLATION_KITS.md).
+
 Les archives d'exécution Windows/Linux et les tests du référentiel PostgreSQL sont
 décrits dans [REFERENTIEL_POSTGRESQL.md](REFERENTIEL_POSTGRESQL.md).
 

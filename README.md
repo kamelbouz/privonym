@@ -1,5 +1,7 @@
 # Privonym
 
+Kits d'installation Windows et Linux : [INSTALLATION_KITS.md](INSTALLATION_KITS.md).
+
 Référentiel PostgreSQL 17 et distributions Windows/Linux :
 [installation, migration et vérifications](REFERENTIEL_POSTGRESQL.md).
 
